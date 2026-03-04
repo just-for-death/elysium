@@ -1,15 +1,10 @@
-# ── Elysium — docker-compose (pre-built images from Docker Hub) ───────────────
+# ── Elysium — docker-compose.build.yml (build from source) ───────────────────
 #
-# Pulls images directly — no local build required.
-# Images: justxforxdocker/elysium, justxforxdocker/elysium-sync
+# Use this file to build images locally from source instead of pulling
+# from Docker Hub. Useful for development or custom forks.
 #
 # Usage:
-#   docker compose up -d
-#   docker compose pull && docker compose up -d   ← update to latest
-#
-# Logs:
-#   docker compose logs -f elysium
-#   docker compose logs -f sync-server
+#   docker compose -f docker-compose.build.yml up -d --build
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -17,7 +12,12 @@ services:
 
   # ── Main app (PWA + REST) ─────────────────────────────────────────────────
   elysium:
-    image: justxforxdocker/elysium:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.build
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
+    image: elysium:local
     container_name: elysium
     restart: unless-stopped
     ports:
@@ -59,17 +59,19 @@ services:
 
   # ── Real-time sync server ─────────────────────────────────────────────────
   sync-server:
-    image: justxforxdocker/elysium-sync:latest
+    build:
+      context: ./sync-server
+      dockerfile: Dockerfile
+    image: elysium-sync:local
     container_name: elysium-sync
     restart: unless-stopped
-    # Not exposed directly — all traffic proxied through elysium at /api/live/*
     # Uncomment to debug directly:
     # ports:
     #   - "3001:3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - SYNC_TTL_MS=86400000   # 24h snapshot TTL
+      - SYNC_TTL_MS=86400000
       - LOG_LEVEL=${SYNC_LOG_LEVEL:-info}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
