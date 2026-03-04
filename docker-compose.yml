@@ -1,0 +1,114 @@
+# ── Elysium — docker-compose ──────────────────────────────────────────────────
+#
+# Two services:
+#   elysium      – React PWA + REST API  (port 7771 → 3000)
+#   sync-server  – Real-time WebSocket / SSE relay  (internal port 3001,
+#                  proxied through elysium at /api/live/*)
+#
+# All log output is structured JSON.  Tail logs with:
+#   docker compose logs -f --no-log-prefix elysium    | jq .
+#   docker compose logs -f --no-log-prefix sync-server | jq .
+#
+# Environment variables (copy .env.example → .env and fill in):
+#   PORT            External port for the PWA  (default 7771)
+#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_EMAIL  — web push (optional)
+#   BROADCAST_SECRET  — protects /push/broadcast (optional)
+#   ENABLE_HSTS       — set "true" only behind HTTPS reverse-proxy
+#   SYNC_LOG_LEVEL    — log verbosity for sync-server: debug|info|warn|error
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Main app (PWA + REST) ─────────────────────────────────────────────────
+  elysium:
+    build:
+      context: .
+      dockerfile: Dockerfile.build
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
+    image: elysium
+    container_name: elysium
+    restart: unless-stopped
+    ports:
+      - "${PORT:-7771}:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      # Internal URL of the sync-server (Docker network — no exposed port needed)
+      - SYNC_SERVER_URL=http://sync-server:3001
+      # ── Web Push (optional) ──────────────────────────────────────────────
+      # Generate keys: docker run --rm node:20-alpine npx web-push generate-vapid-keys
+      # - VAPID_PUBLIC_KEY=your_public_key_here
+      # - VAPID_PRIVATE_KEY=your_private_key_here
+      # - VAPID_EMAIL=mailto:you@example.com
+      # - BROADCAST_SECRET=change_me_to_a_long_random_secret
+      # ── HSTS (HTTPS only) ────────────────────────────────────────────────
+      # - ENABLE_HSTS=true
+    depends_on:
+      sync-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - elysium-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "elysium"
+
+  # ── Real-time sync server ─────────────────────────────────────────────────
+  sync-server:
+    build:
+      context: ./sync-server
+      dockerfile: Dockerfile
+    image: elysium-sync
+    container_name: elysium-sync
+    restart: unless-stopped
+    # Not exposed directly — all traffic flows through elysium's proxy
+    # Uncomment for direct debugging:
+    # ports:
+    #   - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      # Snapshot TTL in milliseconds (default 24 h)
+      - SYNC_TTL_MS=86400000
+      # debug | info | warn | error
+      - LOG_LEVEL=${SYNC_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - elysium-net
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 16M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "elysium-sync"
+
+networks:
+  elysium-net:
+    driver: bridge

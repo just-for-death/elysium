@@ -1,0 +1,38 @@
+.card {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  transition: 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  background: #121212 !important;
+}
+
+.scrollArea {
+  height: calc(100vh - rem(560px));
+  min-height: rem(200px);
+}
+
+.thumbnail {
+  max-width: 100%;
+  border-radius: 8px;
+  margin-bottom: var(--mantine-spacing-xl);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+
+  &:hover {
+    transform: scale(1.01);
+    box-shadow: 0 12px 50px rgba(0,0,0,0.7);
+  }
+
+  @media (min-width: $mantine-breakpoint-sm) {
+    max-width: rem(320px);
+  }
+}
+
+.progressContainer {
+  width: 100%;
+
+  @media (min-width: $mantine-breakpoint-sm) {
+    padding-left: var(--mantine-spacing-xl);
+    padding-right: var(--mantine-spacing-xl);
+  }
+}

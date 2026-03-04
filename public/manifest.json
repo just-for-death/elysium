@@ -1,0 +1,235 @@
+{
+  "id": "/",
+  "short_name": "Elysium",
+  "name": "Elysium \u2013 Private Music Player",
+  "description": "Privacy-focused music player powered by the Invidious API. Listen without ads or tracking.",
+  "display": "standalone",
+  "display_override": [
+    "window-controls-overlay",
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "scope": "/",
+  "start_url": "/?source=pwa",
+  "theme_color": "#1a1b1e",
+  "background_color": "#1a1b1e",
+  "orientation": "any",
+  "dir": "ltr",
+  "lang": "en",
+  "categories": [
+    "music",
+    "entertainment"
+  ],
+  "iarc_rating_id": "",
+  "icons": [
+    {
+      "src": "favicons/android/android-launchericon-48-48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/android-launchericon-72-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/android-launchericon-96-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/android-launchericon-144-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/ios/152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/ios/167.png",
+      "sizes": "167x167",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/ios/180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/android-launchericon-192-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/ios/256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/android-launchericon-512-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/ios/1024.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "favicons/android/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "favicons/android/maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "screenshots/mobile.png",
+      "sizes": "386x737",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Elysium player view"
+    },
+    {
+      "src": "screenshots/favorite-mobile.png",
+      "sizes": "386x737",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Elysium favorites"
+    },
+    {
+      "src": "screenshots/playlists-mobile.png",
+      "sizes": "386x737",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Elysium playlists"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Search",
+      "short_name": "Search",
+      "description": "Search for music",
+      "url": "/search?source=shortcut",
+      "icons": [
+        {
+          "src": "favicons/android/android-launchericon-96-96.png",
+          "sizes": "96x96"
+        },
+        {
+          "src": "favicons/android/android-launchericon-192-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Favorites",
+      "short_name": "Favorites",
+      "description": "Your favorite tracks",
+      "url": "/favorites?source=shortcut",
+      "icons": [
+        {
+          "src": "favicons/android/android-launchericon-96-96.png",
+          "sizes": "96x96"
+        },
+        {
+          "src": "favicons/android/android-launchericon-192-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Playlists",
+      "short_name": "Playlists",
+      "description": "Your playlists",
+      "url": "/playlists?source=shortcut",
+      "icons": [
+        {
+          "src": "favicons/android/android-launchericon-96-96.png",
+          "sizes": "96x96"
+        },
+        {
+          "src": "favicons/android/android-launchericon-192-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Trending",
+      "short_name": "Trending",
+      "description": "Trending music",
+      "url": "/trending?source=shortcut",
+      "icons": [
+        {
+          "src": "favicons/android/android-launchericon-96-96.png",
+          "sizes": "96x96"
+        },
+        {
+          "src": "favicons/android/android-launchericon-192-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "protocol_handlers": [
+    {
+      "protocol": "web+elysium",
+      "url": "/?share=%s"
+    }
+  ],
+  "share_target": {
+    "action": "/share-target",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "file_handlers": [
+    {
+      "action": "/import",
+      "accept": {
+        "application/json": [
+          ".json"
+        ]
+      }
+    }
+  ],
+  "prefer_related_applications": false,
+  "edge_side_panel": {
+    "preferred_width": 400
+  }
+}

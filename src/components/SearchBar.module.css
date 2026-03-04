@@ -1,0 +1,45 @@
+.container {
+  width: 100%;
+
+  @media (min-width: $mantine-breakpoint-sm) {
+    max-width: rem(460px);
+  }
+
+  @media (min-width: 1900px) {
+    max-width: rem(540px);
+  }
+}
+
+.form {
+  flex: 1;
+
+  input {
+    /* iOS Safari zoom fix */
+    font-size: 16px;
+    background: #2a2a2a !important;
+    border: 1.5px solid transparent !important;
+    border-radius: 500px !important;
+    color: #ffffff !important;
+    padding-left: 40px !important;
+    transition: all 0.2s ease !important;
+    font-family: Plus Jakarta Sans, sans-serif !important;
+    font-weight: 500 !important;
+
+    &:focus {
+      border-color: rgba(255,255,255,0.5) !important;
+      background: #3a3a3a !important;
+    }
+
+    &::placeholder {
+      color: rgba(179,179,179,0.6) !important;
+    }
+  }
+}
+
+.kbd {
+  height: rem(22px);
+  line-height: 15px;
+  background: rgba(255,255,255,0.1) !important;
+  color: #b3b3b3 !important;
+  border-color: rgba(255,255,255,0.15) !important;
+}

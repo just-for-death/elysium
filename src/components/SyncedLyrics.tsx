@@ -1,0 +1,163 @@
+import {
+  Badge,
+  Box,
+  Center,
+  Loader,
+  ScrollArea,
+  Text,
+} from "@mantine/core";
+import { memo, useEffect, useRef } from "react";
+import { useQuery } from "react-query";
+
+import { usePlayerState, usePlayerVideo } from "../providers/Player";
+import {
+  getCurrentLineIndex,
+  getLyrics,
+  type LyricLine,
+} from "../services/lyrics";
+import { parseArtistTrack } from "../services/listenbrainz";
+
+export const SyncedLyrics = memo(() => {
+  const { video } = usePlayerVideo();
+  const playerState = usePlayerState();
+  const activeLineRef = useRef<HTMLDivElement>(null);
+
+  // Parse artist/track from video title + author
+  const { artist, track } = video
+    ? parseArtistTrack(video.title, video.author)
+    : { artist: "", track: "" };
+
+  const { data: lyrics, isLoading } = useQuery(
+    ["lyrics", video?.videoId ?? ""],
+    () =>
+      getLyrics(
+        track,
+        artist,
+        undefined,
+        video?.lengthSeconds ?? undefined,
+      ),
+    {
+      enabled: !!video,
+      staleTime: 1000 * 60 * 60,
+      retry: false,
+    },
+  );
+
+  const currentTime = playerState.currentTime ?? 0;
+  const lines: LyricLine[] = lyrics?.lines ?? [];
+  const hasSynced = lines.length > 0;
+  const hasPlain = Boolean(lyrics?.plainLyrics);
+  const currentIdx = hasSynced ? getCurrentLineIndex(lines, currentTime) : -1;
+
+  // Auto-scroll active line into view
+  useEffect(() => {
+    if (activeLineRef.current) {
+      activeLineRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [currentIdx]);
+
+  if (!video) {
+    return (
+      <Center style={{ height: 300 }}>
+        <Text c="dimmed" size="sm">No track playing</Text>
+      </Center>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <Center style={{ height: 300 }}>
+        <Loader size="sm" />
+      </Center>
+    );
+  }
+
+  if (!lyrics || (!hasSynced && !hasPlain)) {
+    return (
+      <Center style={{ height: 300, flexDirection: "column", gap: 8 }}>
+        <Text c="dimmed" size="sm">No lyrics found</Text>
+        <Text c="dimmed" size="xs">
+          {artist} — {track}
+        </Text>
+      </Center>
+    );
+  }
+
+  if (lyrics.instrumental) {
+    return (
+      <Center style={{ height: 300 }}>
+        <Text c="dimmed" size="sm">🎵 Instrumental</Text>
+      </Center>
+    );
+  }
+
+  // Synced lyrics view
+  if (hasSynced) {
+    return (
+      <Box>
+        <Box px="md" pt="xs" pb={4} style={{ textAlign: "center" }}>
+          <Badge color="green" variant="light" size="xs">Synced Lyrics</Badge>
+        </Box>
+        <ScrollArea
+          style={{ height: "calc(100vh - 580px)", minHeight: 200 }}
+        >
+          <Box px="md" py="lg" style={{ textAlign: "center" }}>
+            {lines.map((line, i) => {
+              const isActive = i === currentIdx;
+              const isPast = i < currentIdx;
+              return (
+                <Box
+                  key={i}
+                  ref={isActive ? activeLineRef : undefined}
+                  py={4}
+                  style={{ transition: "all 0.3s ease" }}
+                >
+                  <Text
+                    size={isActive ? "xl" : "md"}
+                    fw={isActive ? 700 : 400}
+                    c={
+                      isActive
+                        ? "white"
+                        : isPast
+                          ? "dimmed"
+                          : "var(--mantine-color-gray-5)"
+                    }
+                    style={{
+                      transition: "all 0.3s ease",
+                      opacity: isPast ? 0.45 : isActive ? 1 : 0.65,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {line.text || "·"}
+                  </Text>
+                </Box>
+              );
+            })}
+            <Box style={{ height: 80 }} />
+          </Box>
+        </ScrollArea>
+      </Box>
+    );
+  }
+
+  // Plain lyrics fallback (no synced lyrics available)
+  return (
+    <Box>
+      <Box px="md" pt="xs" pb={4} style={{ textAlign: "center" }}>
+        <Badge color="gray" variant="light" size="xs">Plain Lyrics</Badge>
+      </Box>
+      <ScrollArea style={{ height: "calc(100vh - 580px)", minHeight: 200 }}>
+        <Box px="md" py="lg" style={{ textAlign: "center" }}>
+          {(lyrics.plainLyrics ?? "").split("\n").map((line, i) => (
+            <Text key={i} size="sm" c="dimmed" py={2} style={{ lineHeight: 1.6 }}>
+              {line || <br />}
+            </Text>
+          ))}
+        </Box>
+      </ScrollArea>
+    </Box>
+  );
+});

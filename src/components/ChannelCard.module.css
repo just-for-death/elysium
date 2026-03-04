@@ -1,0 +1,11 @@
+.card {
+  background: var(--sp-surface, #181818) !important;
+  border-radius: 6px !important;
+  transition: background 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--sp-surface-hover, #282828) !important;
+    transform: translateY(-2px);
+  }
+}

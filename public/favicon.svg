@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <style>
+      /* In dark mode, flip to a dark background with light icon so the
+         favicon remains visible against dark browser chrome (Firefox, Chrome) */
+      @media (prefers-color-scheme: dark) {
+        .bg   { fill: #1a1b1e; }
+        .ring { fill: #4c7ef3; }
+        .hole { fill: #1a1b1e; }
+      }
+    </style>
+    <clipPath id="roundedRect">
+      <rect width="512" height="512" rx="110" ry="110"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background rounded-rect -->
+  <rect class="bg" width="512" height="512" rx="110" ry="110" fill="#ffffff"/>
+
+  <!-- Vinyl / record disc – outer ring -->
+  <circle class="ring" cx="256" cy="256" r="180" fill="#1a3a8f"/>
+
+  <!-- Inner white band -->
+  <circle cx="256" cy="256" r="140" fill="#ffffff"/>
+
+  <!-- Mid blue band -->
+  <circle class="ring" cx="256" cy="256" r="100" fill="#1a3a8f"/>
+
+  <!-- Centre hole -->
+  <circle class="hole" cx="256" cy="256" r="38" fill="#ffffff"/>
+</svg>

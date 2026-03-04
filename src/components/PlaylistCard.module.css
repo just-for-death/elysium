@@ -1,0 +1,49 @@
+.card {
+  background: var(--sp-surface, #181818) !important;
+  color: #ffffff;
+  border-radius: 6px !important;
+  padding: rem(20px) !important;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--sp-surface-hover, #282828) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  }
+}
+
+.video {
+  background-color: rgba(29, 185, 84, 0.15);
+  background-size: cover;
+  color: var(--sp-accent);
+  width: rem(28px);
+  height: rem(28px);
+  border-radius: 4px;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(29, 185, 84, 0.15);
+  background-size: cover;
+  width: rem(28px);
+  height: rem(28px);
+  border-radius: 4px;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.title {
+  margin-bottom: var(--mantine-spacing-xs);
+  margin-top: var(--mantine-spacing-md);
+  cursor: pointer;
+}
+
+.titleText {
+  font-size: rem(22px);
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  font-family: Plus Jakarta Sans, sans-serif !important;
+}

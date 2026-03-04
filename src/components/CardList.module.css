@@ -1,0 +1,25 @@
+.flexGrid {
+  display: flex;
+  flex-direction: row;
+  gap: var(--mantine-spacing-md);
+  overflow: auto;
+  padding-bottom: 8px;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+
+.flexGrid::-webkit-scrollbar {
+  height: 4px;
+}
+.flexGrid::-webkit-scrollbar-track {
+  background: transparent;
+}
+.flexGrid::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 4px;
+}
+
+.flexColumn {
+  flex: 0 0 rem(200px);
+}

@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 1 – Build the React / PWA app
+# ────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install dependencies – skip postinstall (playwright) to avoid downloading Chromium/Firefox.
+# Playwright is only for e2e tests; the PWA runs in the user's browser.
+# Use npm cache mount for faster rebuilds.
+COPY package*.json .env.dist ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --legacy-peer-deps --ignore-scripts 2>/dev/null || \
+    npm install --legacy-peer-deps --ignore-scripts
+RUN cp .env.dist .env
+
+# Copy source and build (disable eslint – linting is not needed in Docker builds)
+COPY . .
+ENV DISABLE_ESLINT_PLUGIN=true
+# Disable source maps to avoid JSON.parse errors when stale .map requests return HTML
+ENV GENERATE_SOURCEMAP=false
+RUN npm run build
+
+# ────────────────────────────────────────────────────────────────────────────
+# Stage 2 – Minimal production server (Node.js + express, no nginx)
+# ────────────────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS production
+
+# Create a non-root user for security
+RUN addgroup -S elysium && adduser -S elysium -G elysium
+
+WORKDIR /app
+
+# Install only the tiny server dependencies (with cache for faster rebuilds)
+COPY server/package.json ./server/package.json
+RUN --mount=type=cache,target=/root/.npm \
+    cd server && npm install --omit=dev --ignore-scripts
+
+# Copy built assets from builder stage
+COPY --from=builder /app/build ./build
+
+# Copy server code
+COPY server/index.js ./server/index.js
+
+# Fix permissions so elysium user can read build files (avoids black screen)
+RUN chown -R elysium:elysium /app
+
+# Use non-root user
+USER elysium
+
+EXPOSE 3000
+
+# Health-check so Docker / Compose know the container is ready
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
+
+CMD ["node", "server/index.js"]

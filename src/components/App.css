@@ -1,0 +1,469 @@
+/* ── Elysium — Teal Design System ─────────────────────────────────────────── */
+:root {
+  /* Teal color palette */
+  --sp-bg: #0a1214;
+  --sp-sidebar: #060d0f;
+  --sp-surface: #0f1d21;
+  --sp-surface-hover: #162830;
+  --sp-surface-press: #1d3540;
+  --sp-player: #0d1a1e;
+  --sp-accent: #2ab5a5;
+  --sp-accent-dark: #0a5e65;
+  --sp-accent-hover: #33d4c3;
+  --sp-accent-light: #6dddd1;
+  --sp-accent-muted: rgba(42, 181, 165, 0.15);
+  --sp-text-primary: #f0fafa;
+  --sp-text-secondary: #8fb8b8;
+  --sp-text-muted: #4d7a7a;
+  --sp-divider: rgba(42, 181, 165, 0.12);
+  --sp-border: rgba(42, 181, 165, 0.08);
+  --sp-nav-width: 232px;
+  --sp-player-height: 90px;
+  --sp-radius: 6px;
+  --sp-radius-full: 500px;
+  --sp-transition: 0.22s cubic-bezier(0.34, 1.02, 0.64, 1);
+  --sp-transition-slow: 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --sp-glow: 0 0 24px rgba(42, 181, 165, 0.25);
+  --sp-glow-strong: 0 0 40px rgba(42, 181, 165, 0.4);
+}
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,500&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+  overflow: hidden;
+  background-color: var(--sp-bg) !important;
+  font-family: Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif !important;
+}
+
+html {
+  height: -webkit-fill-available;
+}
+
+.App {
+  height: 100vh;
+  height: 100dvh;
+  flex-direction: column;
+  background-color: var(--sp-bg);
+  font-family: Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.App.iOS {
+  height: -webkit-fill-available;
+}
+
+@media screen and (min-width: 768px) {
+  .App {
+    flex-direction: row;
+  }
+}
+
+.App-Content {
+  overflow-y: auto;
+  flex: 1;
+  max-height: 100vh;
+  max-height: 100dvh;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: none;
+  background: var(--sp-bg);
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.2) transparent;
+}
+
+.App-Content::-webkit-scrollbar {
+  width: 8px;
+}
+.App-Content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.App-Content::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 4px;
+}
+.App-Content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.4);
+}
+
+/* ── Global Mantine overrides for Spotify dark theme ─────────────────────── */
+.mantine-AppShell-root,
+.mantine-AppShell-main {
+  background: var(--sp-bg) !important;
+}
+
+/* Page-level gradient header */
+.App-Content > div:first-child {
+  background: linear-gradient(180deg, rgba(42,181,165,0.12) 0%, var(--sp-bg) 40%);
+}
+
+/* ── Smooth page transitions ──────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes pulseGreen {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Apply subtle fade-in to main content sections */
+.App-Content > * {
+  animation: fadeSlideIn 0.3s var(--sp-transition) both;
+}
+
+/* ── Mantine component overrides ─────────────────────────────────────────── */
+
+/* Cards */
+.mantine-Card-root {
+  background: var(--sp-surface) !important;
+  border: none !important;
+  transition: background var(--sp-transition), transform var(--sp-transition), box-shadow var(--sp-transition) !important;
+}
+
+.mantine-Card-root:hover {
+  background: var(--sp-surface-hover) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important;
+}
+
+/* Sliders */
+.mantine-Slider-root .mantine-Slider-bar {
+  background: var(--sp-accent) !important;
+}
+
+.mantine-Slider-root:hover .mantine-Slider-thumb {
+  opacity: 1 !important;
+}
+
+.mantine-Slider-thumb {
+  background: var(--sp-text-primary) !important;
+  border-color: var(--sp-text-primary) !important;
+  opacity: 0;
+  transition: opacity 0.2s !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+
+.mantine-Slider-root .mantine-Slider-track::before {
+  background: rgba(255,255,255,0.2) !important;
+}
+
+/* Buttons */
+.mantine-ActionIcon-root {
+  transition: transform var(--sp-transition), color var(--sp-transition), opacity var(--sp-transition) !important;
+  color: var(--sp-text-secondary) !important;
+}
+
+.mantine-ActionIcon-root:hover {
+  transform: scale(1.06) !important;
+  color: var(--sp-text-primary) !important;
+  background: transparent !important;
+}
+
+/* Tooltips */
+.mantine-Tooltip-tooltip {
+  background: var(--sp-surface-hover) !important;
+  color: var(--sp-text-primary) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  border-radius: var(--sp-radius) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4) !important;
+}
+
+/* Text colors */
+.mantine-Text-root {
+  color: var(--sp-text-secondary);
+}
+
+/* Input fields */
+.mantine-Input-input {
+  background: var(--sp-surface-hover) !important;
+  border-color: transparent !important;
+  color: var(--sp-text-primary) !important;
+  font-family: Plus Jakarta Sans, sans-serif !important;
+  transition: background var(--sp-transition), box-shadow var(--sp-transition) !important;
+}
+
+.mantine-Input-input:focus {
+  border-color: var(--sp-text-primary) !important;
+  background: var(--sp-surface-press) !important;
+  box-shadow: none !important;
+}
+
+.mantine-Input-input::placeholder {
+  color: var(--sp-text-muted) !important;
+}
+
+/* Modals/Drawers */
+.mantine-Drawer-content,
+.mantine-Modal-content {
+  background: #282828 !important;
+}
+
+.mantine-Drawer-overlay,
+.mantine-Modal-overlay {
+  backdrop-filter: blur(4px) !important;
+}
+
+/* NavLink */
+.mantine-NavLink-root:hover {
+  background: rgba(255,255,255,0.1) !important;
+}
+
+.mantine-NavLink-root[data-active] {
+  background: rgba(255,255,255,0.15) !important;
+  color: var(--sp-text-primary) !important;
+}
+
+/* Tabs */
+.mantine-Tabs-tab {
+  color: var(--sp-text-secondary) !important;
+  font-weight: 600 !important;
+  transition: color var(--sp-transition) !important;
+}
+.mantine-Tabs-tab[data-active] {
+  color: var(--sp-text-primary) !important;
+  border-color: var(--sp-text-primary) !important;
+}
+
+/* Badges */
+.mantine-Badge-root {
+  background: rgba(42,181,165,0.12) !important;
+  color: var(--sp-accent) !important;
+  border: 1px solid rgba(42,181,165,0.25) !important;
+}
+
+/* ── PWA: safe area insets for iPhone notch / Dynamic Island ───────────── */
+/* Ensures content isn't hidden behind the notch when viewport-fit=cover is set */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+
+body {
+  /* Push content away from home indicator / notch */
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* ── Touch interaction quality ─────────────────────────────────────────── */
+
+/* Prevent iOS double-tap zoom on interactive elements */
+button,
+a,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+input,
+select,
+label {
+  touch-action: manipulation;
+}
+
+/* Remove the grey tap flash on Android Chrome and the blue highlight on iOS */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Suppress the iOS callout menu (magnifier / "Copy"/"Paste") on long-press
+   for UI controls – leave it on text content so users can still select text */
+button,
+a,
+[role="button"],
+img {
+  -webkit-touch-callout: none;
+}
+
+/* Ensure all interactive elements meet the 44×44 pt minimum touch-target
+   recommended by Apple HIG and Android Material Design.
+   We use min-height / min-width so existing larger elements are unaffected. */
+button,
+[role="button"],
+[role="tab"],
+[role="menuitem"],
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Show pointer cursor on clickable elements for touch-pad / mouse users */
+button,
+[role="button"],
+[role="tab"],
+a {
+  cursor: pointer;
+}
+
+/* Prevent overscroll bounce revealing white background on iOS */
+html,
+body {
+  overscroll-behavior: none;
+  background-color: var(--sp-bg);
+}
+
+/* ── Scrollable containers ─────────────────────────────────────────────── */
+
+/* Any element that scrolls should have smooth momentum on iOS */
+[data-scroll],
+.mantine-ScrollArea-viewport,
+.mantine-ScrollArea-scrollbar {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent pull-to-refresh interfering with in-app scroll on Android Chrome */
+body {
+  overscroll-behavior-y: contain;
+}
+
+/* ── Teal-specific overrides ─────────────────────────────────────────────── */
+
+/* Mantine dark overrides → teal bg palette */
+[data-mantine-color-scheme="dark"] {
+  --mantine-color-dark-9: #060d0f;
+  --mantine-color-dark-8: #0a1214;
+  --mantine-color-dark-7: #0f1d21;
+  --mantine-color-dark-6: #0f1d21;
+  --mantine-color-dark-5: #162830;
+  --mantine-color-dark-4: #1d3540;
+  --mantine-color-dark-3: #2a4a55;
+  --mantine-color-dark-2: #4d7a7a;
+  --mantine-color-dark-1: #8fb8b8;
+  --mantine-color-dark-0: #f0fafa;
+}
+
+/* Accent button colors */
+.mantine-Button-root[data-variant="filled"] {
+  background: var(--sp-accent) !important;
+  color: #0a1214 !important;
+  font-weight: 700 !important;
+}
+
+.mantine-Button-root[data-variant="filled"]:hover {
+  background: var(--sp-accent-hover) !important;
+  transform: scale(1.02) !important;
+}
+
+.mantine-Button-root[data-variant="outline"] {
+  border-color: var(--sp-accent) !important;
+  color: var(--sp-accent) !important;
+}
+
+/* Anchor / link teal */
+.mantine-Anchor-root {
+  color: var(--sp-accent) !important;
+  transition: color 0.15s ease !important;
+}
+.mantine-Anchor-root:hover {
+  color: var(--sp-accent-hover) !important;
+}
+
+/* Menu item hover */
+.mantine-Menu-item:hover {
+  background: rgba(42,181,165,0.08) !important;
+  color: var(--sp-text-primary) !important;
+}
+
+/* Notification accent */
+.mantine-Notification-root[data-type="success"],
+.mantine-Notification-root[data-color="teal"] {
+  border-left: 3px solid var(--sp-accent) !important;
+}
+
+/* Slider teal */
+.mantine-Slider-bar {
+  background: var(--sp-accent) !important;
+}
+.mantine-Slider-mark[data-filled] {
+  background: var(--sp-accent) !important;
+}
+
+/* Active icon glow */
+.mantine-ActionIcon-root:hover svg {
+  filter: drop-shadow(0 0 4px rgba(42,181,165,0.4));
+}
+
+/* Vertical slider teal on hover (volume) */
+.VerticalSlider:hover .filledBar {
+  background: var(--sp-accent) !important;
+}
+
+/* ── Enhanced animations ──────────────────────────────────────────────────── */
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes gentleFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes tealPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(42,181,165,0); }
+  50% { box-shadow: 0 0 0 6px rgba(42,181,165,0.15); }
+}
+
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Page content enters */
+.mantine-AppShell-main > * {
+  animation: slideUpFade 0.3s cubic-bezier(0.34, 1.02, 0.64, 1) both;
+}
+
+/* Cards stagger */
+.mantine-Card-root {
+  animation: slideUpFade 0.25s cubic-bezier(0.34, 1.02, 0.64, 1) both;
+}
+
+/* Logo hover float */
+.logo-mark:hover {
+  animation: gentleFloat 2s ease-in-out infinite;
+  box-shadow: var(--sp-glow-strong) !important;
+}
+
+/* Player container entrance */
+.Player-container {
+  animation: slideUpFade 0.4s cubic-bezier(0.34, 1.02, 0.64, 1);
+}
+
+/* Currently playing card highlight */
+[data-playing="true"] .mantine-Card-root,
+.card-playing {
+  box-shadow: 0 0 0 1px rgba(42,181,165,0.4), var(--sp-glow) !important;
+}

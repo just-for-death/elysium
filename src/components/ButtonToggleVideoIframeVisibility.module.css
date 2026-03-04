@@ -1,0 +1,9 @@
+.button {
+  position: absolute;
+  left: rem(-44px);
+  top: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  z-index: 5;
+  transition: 0.2s;
+}

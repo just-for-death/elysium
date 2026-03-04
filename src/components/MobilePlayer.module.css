@@ -1,0 +1,21 @@
+.container {
+  position: absolute;
+  bottom: rem(50px);
+  padding-bottom: rem(8px);
+  left: 8px;
+  right: 8px;
+  z-index: 2;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+}
+
+.content {
+  padding: 10px 16px;
+  padding-right: var(--mantine-spacing-md);
+  padding-left: var(--mantine-spacing-md);
+  gap: var(--mantine-spacing-xs);
+  text-align: center;
+  justify-content: space-between;
+  align-items: center;
+}

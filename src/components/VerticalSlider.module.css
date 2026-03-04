@@ -1,0 +1,27 @@
+.container {
+  position: relative;
+  width: rem(4px);
+  height: rem(120px);
+  border-radius: 2px;
+  cursor: pointer;
+  background: rgba(42,181,165,0.15);
+  transition: width 0.2s ease;
+
+  &:hover {
+    width: rem(5px);
+  }
+}
+
+.filledBar {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  border-radius: 2px;
+  background: var(--sp-text-primary, #f0fafa);
+  transition: background 0.2s ease;
+}
+
+.container:hover .filledBar {
+  background: var(--sp-accent, #2ab5a5);
+  box-shadow: 0 0 8px rgba(42,181,165,0.4);
+}

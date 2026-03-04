@@ -1,0 +1,42 @@
+.link {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  width: 100%;
+  border-radius: 0;
+  color: #b3b3b3;
+  font-family: Plus Jakarta Sans, -apple-system, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color 0.15s ease, background 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  min-height: 44px;
+  position: relative;
+
+  @media (min-width: em(460px)) {
+    &:hover {
+      color: #ffffff;
+      background: rgba(255,255,255,0.05);
+    }
+  }
+
+  &[data-active="true"] {
+    color: #ffffff !important;
+    background: transparent !important;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 24px;
+      background: var(--sp-accent);
+      border-radius: 0 2px 2px 0;
+    }
+  }
+}

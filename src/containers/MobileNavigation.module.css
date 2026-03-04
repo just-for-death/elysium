@@ -1,0 +1,113 @@
+/* ── Compact bottom tab bar - Spotify inspired ─────────────────────── */
+
+.bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  display: flex;
+  align-items: stretch;
+  background: rgba(6, 13, 15, 0.96);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  z-index: 100;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #727272;
+  transition: color 0.15s ease, transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  padding: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.tab:active {
+  transform: scale(0.95);
+}
+
+.tab[data-active="true"] {
+  color: var(--sp-accent, #2ab5a5);
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60px;
+  font-family: Plus Jakarta Sans, sans-serif;
+}
+
+/* ── More sheet ─────────────────────────────────────────────────────── */
+
+.sheetOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+  backdrop-filter: blur(4px);
+}
+
+.sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #282828;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  z-index: 201;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+}
+
+.sheetHandle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  margin: 12px auto 4px;
+}
+
+.sheetItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 20px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  color: var(--sp-accent, #2ab5a5);
+  font-size: 15px;
+  font-weight: 500;
+  font-family: Plus Jakarta Sans, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.sheetItem:active {
+  background: rgba(255,255,255,0.08);
+}
+
+.sheetItem[data-active="true"] {
+  color: var(--sp-accent);
+}
