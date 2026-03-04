@@ -1,11 +1,11 @@
 import type { Instance } from "../types/interfaces/Instance";
 
 /** Default Invidious instance - music/audio focused, per user preference */
-export const DEFAULT_INVIDIOUS_URI = "https://yt.ikiagi.loseyourip.com";
+export const DEFAULT_INVIDIOUS_URI = "https://inv.nadeko.net";
 
 /** Fallback instance when API returns no usable instances */
 export const getDefaultInstance = (): Instance => ({
-  domain: "yt.ikiagi.loseyourip.com",
+  domain: "inv.nadeko.net",
   api: true,
   cors: true,
   flag: "🌐",
