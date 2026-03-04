@@ -14,7 +14,7 @@ import { usePlayerVideo } from "../providers/Player";
 import { useSettings } from "../providers/Settings";
 import type { Video } from "../types/interfaces/Video";
 
-type ShareType = "holoplay" | "invidious" | "youtube";
+type ShareType = "elysium" | "invidious" | "youtube";
 
 interface ButtonDownloadProps {
   iconSize?: number;
@@ -28,8 +28,8 @@ export const ButtonShare: FC<ButtonDownloadProps> = memo(({ iconSize }) => {
 
   const formateVideoUrl = (type: ShareType) => {
     switch (type) {
-      case "holoplay":
-        return `https://app.holoplay.io/?v=${video.videoId}`;
+      case "elysium":
+        return `https://github.com/just-for-death/elysium`;
       case "invidious":
         return `${settings.currentInstance?.uri}/watch?v=${video.videoId}`;
       case "youtube":
@@ -55,10 +55,10 @@ export const ButtonShare: FC<ButtonDownloadProps> = memo(({ iconSize }) => {
       <Menu.Dropdown>
         <Menu.Label>{t("share.title")}</Menu.Label>
         <Menu.Item
-          onClick={() => handleClick("holoplay")}
+          onClick={() => handleClick("elysium")}
           leftSection={<IconCopy size={18} />}
         >
-          {t("share.holoplay.link")}
+          {t("share.elysium.link")}
         </Menu.Item>
         <Menu.Item
           onClick={() => handleClick("invidious")}

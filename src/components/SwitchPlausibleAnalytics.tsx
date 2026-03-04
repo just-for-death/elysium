@@ -28,7 +28,7 @@ export const SwitchPlausibleAnalytics = memo(() => {
       <Alert mb="lg">
         {t("settings.general.analytics.info")}{" "}
         <a
-          href="https://plausible.holoplay.io/holoplay.io"
+          href="https://plausible.io"
           target="_blank"
           rel="noreferrer"
         >

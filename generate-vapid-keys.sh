@@ -1,5 +1,5 @@
 #!/bin/sh
-# HoloPlay – generate VAPID keys for Web Push
+# Elysium – generate VAPID keys for Web Push
 # Run this once then add the keys to docker-compose.yml or a .env file
 
 echo "Generating VAPID keys for Web Push notifications..."

@@ -1,7 +1,7 @@
 {
-  "name": "holoplay-server",
+  "name": "elysium-server",
   "version": "1.0.0",
-  "description": "Lightweight production server for HoloPlay PWA",
+  "description": "Lightweight production server for Elysium PWA",
   "main": "index.js",
   "private": true,
   "engines": {

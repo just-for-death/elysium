@@ -4,7 +4,7 @@ import { useScript } from "../hooks/useScript";
 import { useSettings } from "../providers/Settings";
 
 const PLAUSIBLE_INSTANCE_SCRIPT_URL =
-  "https://plausible.holoplay.io/js/script.js";
+  "https://plausible.io/js/script.js";
 
 export const Scripts = memo(() => {
   const settings = useSettings();

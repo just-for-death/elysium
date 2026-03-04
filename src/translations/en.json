@@ -97,7 +97,7 @@
   "button.favorite.remove": "Remove from favorite",
   "live": "Live",
   "share.title": "Share",
-  "share.holoplay.link": "Copy Elysium link",
+  "share.elysium.link": "Copy Elysium link",
   "share.invidious.link": "Copy Invidious link",
   "share.youtube.link": "Copy Youtube link",
   "share.notification.title": "Copied to clipboard",

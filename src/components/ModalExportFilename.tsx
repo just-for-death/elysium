@@ -8,7 +8,7 @@ import { useSetSettings, useSettings } from "../providers/Settings";
 import { Modal } from "./Modal";
 
 const getDefaultExportFileName = () =>
-  `holoplay-export-${format(new Date(), "dd-MM-yyyy")}.json`;
+  `elysium-export-${format(new Date(), "dd-MM-yyyy")}.json`;
 
 interface ModalExportFilenameProps {
   opened: boolean;
