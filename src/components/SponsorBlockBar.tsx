@@ -1,7 +1,7 @@
 import { Flex } from "@mantine/core";
 import { memo, useMemo } from "react";
 
-import { usePlayerState, usePlayerVideo } from "../providers/Player";
+import { usePlayerStatus, usePlayerVideo } from "../providers/Player";
 import { useSettings } from "../providers/Settings";
 import type { SponsorBlockSegment } from "../types/interfaces/SponsorBlock";
 import classes from "./SponsorBlockBar.module.css";
@@ -13,7 +13,20 @@ interface RangeSponsorBlockSegment extends SponsorBlockSegment {
 export const SponsorBlockBar = memo(() => {
   const settings = useSettings();
   const playerVideo = usePlayerVideo();
-  const playerState = usePlayerState();
+  const playerState = usePlayerStatus();
+
+  // Fix: useMemo must be called unconditionally (Rules of Hooks).
+  // Move it above the early return; guard inside the memo callback instead.
+  const segments = useMemo(
+    () =>
+      playerVideo.sponsorBlockSegments && playerState.audioDuration
+        ? rangeSponsorBlockSegments(
+            playerVideo.sponsorBlockSegments,
+            playerState.audioDuration,
+          )
+        : [],
+    [playerVideo.sponsorBlockSegments, playerState.audioDuration],
+  );
 
   if (
     !settings.sponsorBlock ||
@@ -22,17 +35,6 @@ export const SponsorBlockBar = memo(() => {
   ) {
     return null;
   }
-
-  const segments = useMemo(
-    () =>
-      playerVideo.sponsorBlockSegments
-        ? rangeSponsorBlockSegments(
-            playerVideo.sponsorBlockSegments,
-            playerState.audioDuration as number,
-          )
-        : [],
-    [playerVideo.sponsorBlockSegments, playerState.audioDuration],
-  );
 
   return (
     <Flex className={classes.container}>

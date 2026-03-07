@@ -1,8 +1,8 @@
 import { useCallback, useEffect } from "react";
 
 import {
-  usePlayerAudio,
-  usePlayerState,
+  useAudioElement,
+  usePlayerProgress,
   usePlayerVideo,
 } from "../providers/Player";
 import type { SponsorBlockSegment } from "../types/interfaces/SponsorBlock";
@@ -24,16 +24,16 @@ const getNextSegment = (
 
 export const useSponsorBlock = () => {
   const playerVideo = usePlayerVideo();
-  const playerState = usePlayerState();
-  const playerAudio = usePlayerAudio();
+  const playerState = usePlayerProgress();
+  const getAudioEl = useAudioElement();
 
   const handleSeek = useCallback(
     (currentTime: number) => {
-      // @ts-ignore
-      const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
+      const audio = getAudioEl();
+      if (!audio) return;
       audio.currentTime = currentTime;
     },
-    [playerAudio],
+    [getAudioEl],
   );
 
   useEffect(() => {

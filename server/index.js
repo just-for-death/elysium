@@ -176,6 +176,150 @@ app.get("/api/sponsorBlock", (_req, res) => {
   res.json({ segments: [] });
 });
 
+// ── API: Lyrics proxy (NetEase Cloud Music) ────────────────────────────────────
+// Forwards requests to NetEase (music.163.com) which blocks cross-origin browser requests.
+// The server makes the request server-side and returns the JSON with CORS headers set.
+
+app.get("/api/lyrics-proxy/netease/search", async (req, res) => {
+  const { s, limit } = req.query;
+  if (!s) return res.status(400).json({ error: "Missing query param: s" });
+  try {
+    const url = `https://music.163.com/api/search/get?s=${encodeURIComponent(s)}&type=1&limit=${limit || 5}`;
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "NetEase search error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "NetEase search failed", detail: err.message });
+  }
+});
+
+app.get("/api/lyrics-proxy/netease/lyric", async (req, res) => {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: "Missing query param: id" });
+  try {
+    const url = `https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`;
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "NetEase lyric error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "NetEase lyric fetch failed", detail: err.message });
+  }
+});
+
+// ── API: iTunes / Apple Music proxy ───────────────────────────────────────────
+// itunes.apple.com does not send CORS headers — all direct browser requests are
+// blocked. The server proxies requests and returns JSON with CORS headers.
+// Responses are cached 1 hour (artwork URLs are stable CDN links).
+
+app.get("/api/itunes-proxy/search", async (req, res) => {
+  const { term, media, entity, limit, lang } = req.query;
+  if (!term) return res.status(400).json({ error: "Missing query param: term" });
+  try {
+    const params = new URLSearchParams();
+    params.set("term", term);
+    if (media)  params.set("media",  media);
+    if (entity) params.set("entity", entity);
+    if (limit)  params.set("limit",  limit);
+    if (lang)   params.set("lang",   lang);
+    const upstream = await fetch(`https://itunes.apple.com/search?${params}`, {
+      headers: { "User-Agent": "Elysium/1.12" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (upstream.status === 429) return res.status(429).json({ error: "iTunes rate limited" });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "iTunes search proxy failed", detail: err.message });
+  }
+});
+
+app.get("/api/itunes-proxy/lookup", async (req, res) => {
+  const { id, entity, limit, sort } = req.query;
+  if (!id) return res.status(400).json({ error: "Missing query param: id" });
+  try {
+    const params = new URLSearchParams();
+    params.set("id", id);
+    if (entity) params.set("entity", entity);
+    if (limit)  params.set("limit",  limit);
+    if (sort)   params.set("sort",   sort);
+    const upstream = await fetch(`https://itunes.apple.com/lookup?${params}`, {
+      headers: { "User-Agent": "Elysium/1.12" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes lookup error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "iTunes lookup proxy failed", detail: err.message });
+  }
+});
+
+
+app.get("/api/itunes-proxy/rss/:cc/:chart", async (req, res) => {
+  const { cc, chart } = req.params;
+  const limit = parseInt(req.query.limit) || 50;
+  // Only allow known chart types to prevent open proxy abuse
+  const allowed = ["topsongs", "topalbums", "topmusic", "newmusic", "recentreleases"];
+  if (!allowed.includes(chart)) return res.status(400).json({ error: "Unknown chart type" });
+  try {
+    const url = `https://itunes.apple.com/${encodeURIComponent(cc)}/rss/${encodeURIComponent(chart)}/limit=${limit}/json`;
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": "Elysium/1.12" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes RSS error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "iTunes RSS proxy failed", detail: err.message });
+  }
+});
+
+// ── API: ListenBrainz proxy ────────────────────────────────────────────────────
+//
+// The LB CF recommendations endpoint returns a 308 redirect from the browser,
+// and CORS fails on redirects because the redirect response does not carry
+// Access-Control-Allow-Origin. Proxying server-side avoids this entirely.
+// The Authorization token is passed via the x-lb-token request header.
+
+app.get("/api/lb-proxy/recommendations/cf/recording/for_user/:username", async (req, res) => {
+  const { username } = req.params;
+  const { count } = req.query;
+  const userToken = req.headers["x-lb-token"];
+  if (!username) return res.status(400).json({ error: "Missing username" });
+  if (!userToken) return res.status(400).json({ error: "Missing x-lb-token header" });
+  try {
+    const params = new URLSearchParams();
+    if (count) params.set("count", count);
+    const url = `https://api.listenbrainz.org/1/recommendations/cf/recording/for_user/${encodeURIComponent(username)}?${params}`;
+    const upstream = await fetch(url, {
+      headers: { Authorization: `Token ${userToken}`, "User-Agent": "Elysium/1.12" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "ListenBrainz CF recommendations error" });
+    const data = await upstream.json();
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: "ListenBrainz CF proxy failed", detail: err.message });
+  }
+});
+
 // ── API: RemotePlay stubs ──────────────────────────────────────────────────────
 // Real remote play now happens through sync-server WebSocket.
 // These stubs keep the old polling hook from crashing.
@@ -385,7 +529,34 @@ app.post("/api/invidious/playlists/:id/videos", async (req, res) => {
   }
 });
 
+// ── GET /api/invidious/playlists/:id ──────────────────────────────────────────
+// Fetches a single Invidious playlist by ID including its full video list.
+// Uses /api/v1/auth/playlists/:id which returns complete video data (unlike
+// the list endpoint /api/v1/auth/playlists which returns videos: [] for each).
+app.get("/api/invidious/playlists/:id", async (req, res) => {
+  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
+  const sid  = req.headers["x-invidious-sid"] || "";
+  const { id } = req.params;
+  if (!base || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+
+  try {
+    const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}`);
+    const text = await upstream.text();
+    if (!upstream.ok) {
+      log.warn("invidious:get-playlist:error", { base, id, status: upstream.status });
+      return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.send(text);
+  } catch (err) {
+    log.error("invidious:get-playlist", { err: err.message });
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ── DELETE /api/invidious/playlists/:id/videos/:vid ───────────────────────────
+// NOTE: :vid must be the video's "indexId" field (not videoId) per Invidious API docs.
+// See: DELETE /api/v1/auth/playlists/:id/videos/:index
 app.delete("/api/invidious/playlists/:id/videos/:vid", async (req, res) => {
   const base       = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
   const sid        = req.headers["x-invidious-sid"] || "";
@@ -394,7 +565,12 @@ app.delete("/api/invidious/playlists/:id/videos/:vid", async (req, res) => {
 
   try {
     const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}/videos/${vid}`, { method: "DELETE" });
-    res.status(upstream.status).json({ ok: upstream.ok });
+    const text = await upstream.text();
+    if (!upstream.ok) {
+      log.warn("invidious:remove-video:error", { base, id, vid, status: upstream.status, body: text.slice(0, 200) });
+      return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
+    }
+    res.status(204).end();
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -411,6 +587,37 @@ app.delete("/api/invidious/playlists/:id", async (req, res) => {
     const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}`, { method: "DELETE" });
     res.status(upstream.status).json({ ok: upstream.ok });
   } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── GET /api/invidious/search ─────────────────────────────────────────────────
+// Proxies a search query to an Invidious instance, bypassing browser CORS.
+// Query params: instanceUrl (required), q, type, sort_by, page
+app.get("/api/invidious/search", async (req, res) => {
+  const { instanceUrl, ...searchParams } = req.query;
+  if (!instanceUrl) return res.status(400).json({ error: "instanceUrl query param required" });
+
+  let base;
+  try { base = parseInstanceUrl(instanceUrl); }
+  catch (e) { return res.status(400).json({ error: `Invalid instanceUrl: ${e.message}` }); }
+
+  try {
+    const qs = new URLSearchParams(searchParams).toString();
+    const url = `${base}/api/v1/search?${qs}`;
+    const upstream = await fetch(url, {
+      headers: { "User-Agent": "Elysium/1.0" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await upstream.text();
+    if (!upstream.ok) {
+      log.warn("invidious:search:error", { base, status: upstream.status });
+      return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
+    }
+    res.setHeader("Content-Type", "application/json");
+    res.send(text);
+  } catch (err) {
+    log.error("invidious:search", { err: err.message });
     res.status(502).json({ error: err.message });
   }
 });

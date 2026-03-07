@@ -45,12 +45,13 @@ import {
   memo,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 
 import { db } from "../database";
-import { getPlaylists } from "../database/utils";
+import { getPlaylists, updatePlaylistVideos } from "../database/utils";
 import { usePlaylists, useSetPlaylists } from "../providers/Playlist";
 import { useSettings } from "../providers/Settings";
 import { useSetPlayerPlaylist } from "../providers/PlayerPlaylist";
@@ -59,12 +60,16 @@ import type { Playlist } from "../types/interfaces/Playlist";
 import type { CardVideo } from "../types/interfaces/Card";
 import {
   createListenBrainzPlaylist,
+  deleteListenBrainzPlaylist,
   getListenBrainzPlaylists,
   getListenBrainzPlaylistById,
   syncAllPlaylistsToListenBrainz,
+  enrichLBPlaylistTracks,
   type LBPlaylist,
   type LBPlaylistTrack,
 } from "../services/listenbrainz";
+import { normalizeInstanceUri } from "../utils/invidiousInstance";
+import { getCurrentInstance } from "../utils/getCurrentInstance";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -154,6 +159,11 @@ export const ListenBrainzPlaylistSync = memo(() => {
       }
     : null;
 
+  const invidiousBaseUri = useMemo(
+    () => normalizeInstanceUri(getCurrentInstance()?.uri ?? ""),
+    [],
+  );
+
   // ── Fetch LB playlists ────────────────────────────────────────────────────
 
   const fetchLBPlaylists = useCallback(
@@ -218,39 +228,113 @@ export const ListenBrainzPlaylistSync = memo(() => {
     if (!credentials) return;
     setImportingId(pl.mbid);
     try {
+      // Always fetch full track list — the list API never includes recordings
       let tracks = pl.tracks;
-      if (!tracks.length && pl.trackCount > 0) {
+      if (!tracks.length) {
         const full = await getListenBrainzPlaylistById(credentials, pl.mbid);
         tracks = full?.tracks ?? [];
       }
 
-      const videos: CardVideo[] = tracks
-        .filter((t) => !!t.videoId)
-        .map(lbTrackToCardVideo);
-
-      if (!videos.length) {
+      if (!tracks.length) {
         notifications.show({
           title: "Import failed",
-          message: "No YouTube-linked tracks found in this playlist.",
+          message: "This playlist has no tracks.",
           color: "orange",
         });
         return;
       }
 
-      const title = `[LB] ${pl.title}`;
+      // Enrich: tracks without YouTube IDs are resolved via Invidious search
+      const enriched = await enrichLBPlaylistTracks(tracks, invidiousBaseUri, 4);
+      const videos: CardVideo[] = enriched
+        .filter((t) => !!t.videoId)
+        .map((t) => ({
+          type: "video" as const,
+          videoId: t.videoId!,
+          title: t.title,
+          thumbnail: t.thumbnail ?? `https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg`,
+          liveNow: false,
+          lengthSeconds: 0,
+          // Preserve MBID so pushing back to LB doesn't need to re-lookup
+          ...(t.lbTrack.recordingMbid ? { recordingMbid: t.lbTrack.recordingMbid } : {}),
+        }));
+
+      if (!videos.length) {
+        notifications.show({
+          title: "Import failed",
+          message: "None of the tracks could be resolved to YouTube videos.",
+          color: "orange",
+        });
+        return;
+      }
+
+      const title = pl.title;
+      const allLocal = db.queryAll("playlists") as any[];
+
+      // 1. Check by lbPlaylistId — exact LB identity match
+      const byLbId = allLocal.find(
+        (p) => p.lbPlaylistId && p.lbPlaylistId === pl.mbid
+      );
+      if (byLbId) {
+        const localIds = new Set((byLbId.videos ?? []).map((v: any) => v.videoId));
+        const newVids = videos.filter((v) => !localIds.has(v.videoId));
+        if (newVids.length) {
+          updatePlaylistVideos(byLbId.title, [...(byLbId.videos ?? []), ...newVids] as CardVideo[]);
+        }
+        setPlaylists(getPlaylists());
+        notifications.show({
+          title: newVids.length ? "Playlist updated!" : "Already up to date",
+          message: newVids.length
+            ? `"${byLbId.title}" +${newVids.length} new tracks`
+            : `"${byLbId.title}" has no new tracks`,
+          color: "teal",
+          autoClose: 5000,
+        });
+        return;
+      }
+
+      // 2. Fall back to title match — tag with lbPlaylistId and merge
+      const byTitle = allLocal.find(
+        (p) => p.title === title && p.title !== "Favorites" && p.title !== "Cache"
+      );
+      if (byTitle) {
+        const localIds = new Set((byTitle.videos ?? []).map((v: any) => v.videoId));
+        const newVids = videos.filter((v) => !localIds.has(v.videoId));
+        db.update("playlists", { title: byTitle.title }, (raw: any) => ({
+          ...raw,
+          lbPlaylistId: pl.mbid,
+          videos: [...(raw.videos ?? []), ...newVids],
+          videoCount: (raw.videos ?? []).length + newVids.length,
+        }));
+        db.commit();
+        setPlaylists(getPlaylists());
+        notifications.show({
+          title: newVids.length ? "Playlist updated!" : "Already up to date",
+          message: newVids.length
+            ? `"${title}" +${newVids.length} new tracks`
+            : `"${title}" has no new tracks`,
+          color: "teal",
+          autoClose: 5000,
+        });
+        return;
+      }
+
+      // 3. Brand new — insert with syncId + lbPlaylistId
       db.insert("playlists", {
         createdAt: new Date().toISOString(),
         title,
         videos,
         videoCount: videos.length,
         type: "playlist",
+        syncId: crypto.randomUUID(),
+        lbPlaylistId: pl.mbid,
       });
       db.commit();
       setPlaylists(getPlaylists());
 
       notifications.show({
         title: "Imported!",
-        message: `"${title}" (${videos.length} tracks) added to your playlists.`,
+        message: `"${title}" (${videos.length}/${tracks.length} tracks resolved) added to your playlists.`,
         color: "teal",
         autoClose: 5000,
       });
@@ -265,18 +349,39 @@ export const ListenBrainzPlaylistSync = memo(() => {
     if (!credentials) return;
     setQueuingId(pl.mbid);
     try {
+      // Always fetch full track list — the list API never includes recordings
       let tracks = pl.tracks;
-      if (!tracks.length && pl.trackCount > 0) {
+      if (!tracks.length) {
         const full = await getListenBrainzPlaylistById(credentials, pl.mbid);
         tracks = full?.tracks ?? [];
       }
 
-      const videos = tracks.filter((t) => !!t.videoId).map(lbTrackToCardVideo);
+      if (!tracks.length) {
+        notifications.show({
+          title: "Queue failed",
+          message: "This playlist has no tracks.",
+          color: "orange",
+        });
+        return;
+      }
+
+      // Enrich: resolve tracks without YouTube IDs via Invidious search
+      const enriched = await enrichLBPlaylistTracks(tracks, invidiousBaseUri, 4);
+      const videos = enriched
+        .filter((t) => !!t.videoId)
+        .map((t) => ({
+          type: "video" as const,
+          videoId: t.videoId!,
+          title: t.title,
+          thumbnail: t.thumbnail ?? `https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg`,
+          liveNow: false,
+          lengthSeconds: 0,
+        }));
 
       if (!videos.length) {
         notifications.show({
           title: "Queue failed",
-          message: "No YouTube-linked tracks found in this playlist.",
+          message: "None of the tracks could be resolved to YouTube videos.",
           color: "orange",
         });
         return;
@@ -286,7 +391,7 @@ export const ListenBrainzPlaylistSync = memo(() => {
 
       notifications.show({
         title: "Added to queue!",
-        message: `${videos.length} tracks from "${pl.title}" queued.`,
+        message: `${videos.length}/${tracks.length} tracks from "${pl.title}" queued.`,
         color: "teal",
         autoClose: 4000,
       });
@@ -295,38 +400,77 @@ export const ListenBrainzPlaylistSync = memo(() => {
     }
   };
 
-  // ── Share single local playlist to LB ────────────────────────────────────
+  // ── Share/sync single local playlist to LB ───────────────────────────────
 
   const handleShareSingle = async (playlist: Playlist) => {
     if (!credentials) return;
 
+    const total = playlist.videos.length;
+    const notifId = `lb-share-${playlist.ID}`;
     notifications.show({
-      id: `lb-share-${playlist.ID}`,
-      title: "Sharing to ListenBrainz…",
-      message: `Creating playlist "${playlist.title}"`,
+      id: notifId,
+      title: "Syncing to ListenBrainz…",
+      message: `Looking up MusicBrainz recordings for ${total} track${total !== 1 ? "s" : ""}…`,
       loading: true,
       autoClose: false,
     });
+
+    // Check if a same-titled playlist already exists on LB — delete it first (update flow).
+    // The full recreate already reflects all local deletions, so no surgical delete needed here.
+    try {
+      const { playlists: existing } = await getListenBrainzPlaylists(credentials, 0, 50);
+      const match = existing.find(
+        (p) => p.title.toLowerCase() === playlist.title.toLowerCase() && p.creator === credentials.username,
+      );
+      if (match?.mbid) {
+        notifications.update({
+          id: notifId,
+          title: "Syncing to ListenBrainz…",
+          message: "Replacing existing playlist…",
+          loading: true,
+          autoClose: false,
+        });
+        await deleteListenBrainzPlaylist(credentials, match.mbid);
+      }
+    } catch {
+      // Non-fatal — proceed with create
+    }
 
     const tracks: LBPlaylistTrack[] = playlist.videos.map((v: any) => ({
       videoId: v.videoId,
       title: v.title,
       author: (v as any).author ?? (v as any).videoAuthor,
+      recordingMbid: (v as any).recordingMbid ?? undefined,
     }));
 
     const result = await createListenBrainzPlaylist(
       credentials,
       playlist.title,
       tracks,
-      `${playlist.videoCount} tracks — exported from Elysium`,
+      `${playlist.videoCount} tracks — synced from Elysium`,
+      (done, tot) => {
+        notifications.update({
+          id: notifId,
+          title: "Syncing to ListenBrainz…",
+          message: `Resolving recordings… ${done}/${tot}`,
+          loading: true,
+          autoClose: false,
+        });
+      },
     );
 
-    notifications.hide(`lb-share-${playlist.ID}`);
+    notifications.hide(notifId);
 
     if (result.success && result.playlistUrl) {
+      // Update lbPlaylistId after successful push
+      db.update("playlists", { title: playlist.title }, (raw: any) => ({
+        ...raw,
+        ...(result.playlistMbid ? { lbPlaylistId: result.playlistMbid } : {}),
+      }));
+      db.commit();
       navigator.clipboard?.writeText(result.playlistUrl).catch(() => {});
       notifications.show({
-        title: "Shared to ListenBrainz!",
+        title: "Synced to ListenBrainz!",
         message: (
           <Anchor
             href={result.playlistUrl}
@@ -343,7 +487,7 @@ export const ListenBrainzPlaylistSync = memo(() => {
       fetchLBPlaylists(true);
     } else {
       notifications.show({
-        title: "Share failed",
+        title: "Sync failed",
         message: result.error ?? "Unknown error",
         color: "red",
       });
@@ -394,6 +538,11 @@ export const ListenBrainzPlaylistSync = memo(() => {
       skipped: result.skipped,
       errors: result.errors,
     }));
+
+    // Refresh playlists if any were created (lbPlaylistId may have been updated)
+    if (result.created.length) {
+      setPlaylists(getPlaylists());
+    }
 
     fetchLBPlaylists(true);
 
@@ -508,7 +657,7 @@ export const ListenBrainzPlaylistSync = memo(() => {
             variant="filled"
             style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}
           >
-            Push All
+            Sync All
           </Button>
         </Group>
       </Flex>
@@ -637,7 +786,7 @@ export const ListenBrainzPlaylistSync = memo(() => {
                     </Text>
                   </Box>
                 </Flex>
-                <Tooltip label="Push to ListenBrainz">
+                <Tooltip label="Sync to ListenBrainz (replaces existing)">
                   <ActionIcon
                     size="sm"
                     variant="subtle"
@@ -721,7 +870,7 @@ export const ListenBrainzPlaylistSync = memo(() => {
                           {pl.title}
                         </Text>
                         <Text size="xs" c="dimmed">
-                          {pl.trackCount} tracks
+                          {pl.trackCount != null ? `${pl.trackCount} tracks` : "tracks"}
                         </Text>
                       </Box>
                     </Flex>

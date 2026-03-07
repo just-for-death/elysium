@@ -19,6 +19,7 @@ import { useStableNavigate } from "../providers/Navigate";
 import { usePlaylists, useSetPlaylists } from "../providers/Playlist";
 import type { CardPlaylist, CardVideo } from "../types/interfaces/Card";
 import { getThumbnailQuality } from "../utils/formatData";
+import { sanitizeThumbnailUrl } from "../utils/cleanVideoThumbnailsUrl";
 import { ButtonFavorite } from "./ButtonFavorite";
 import classes from "./PlaylistCard.module.css";
 import { PlaylistCardMenu } from "./PlaylistCardMenu";
@@ -134,10 +135,11 @@ const VideosThumbnail: FC<VideosThumbnailProps> = memo(
               key={video.videoId}
               className={classes.video}
               style={{
-                backgroundImage: `url(${domain}${
-                  video.thumbnail ??
-                  getThumbnailQuality(video.videoThumbnails ?? [], "medium")
-                })`,
+                backgroundImage: `url(${sanitizeThumbnailUrl(
+                  video.thumbnail ?? getThumbnailQuality(video.videoThumbnails ?? [], "medium"),
+                  domain,
+                  video.videoId,
+                )})`,
               }}
             />
           </Tooltip>

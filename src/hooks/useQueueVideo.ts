@@ -4,7 +4,7 @@ import { showNotification } from "@mantine/notifications";
 import type { CardVideo } from "../types/interfaces/Card";
 import type { Video } from "../types/interfaces/Video";
 import { usePlayerVideo } from "../providers/Player";
-import { usePlayerPlaylist, useSetPlayerPlaylist } from "../providers/PlayerPlaylist";
+import { usePlayerPlaylist, useSetPlayerPlaylist, useSetPinnedVideoIds } from "../providers/PlayerPlaylist";
 import { useSetPreviousNextVideos } from "../providers/PreviousNextTrack";
 
 const cardVideoToVideo = (card: CardVideo): Video => ({
@@ -30,11 +30,6 @@ const cardVideoToVideo = (card: CardVideo): Video => ({
   lengthSeconds: card.lengthSeconds,
 });
 
-const getNextVideoId = (videos: Video[], currentVideoId: string): string | null => {
-  const idx = videos.findIndex((v) => v.videoId === currentVideoId);
-  return videos[idx + 1]?.videoId ?? null;
-};
-
 const getPreviousAndNextVideoId = (videos: Video[], videoId: string) => {
   const idx = videos.findIndex((v) => v.videoId === videoId);
   return {
@@ -50,19 +45,21 @@ export const useQueueVideo = () => {
   const playlist = usePlayerPlaylist();
   const setPlaylist = useSetPlayerPlaylist();
   const setPreviousNextVideos = useSetPreviousNextVideos();
+  const { pin, unpin } = useSetPinnedVideoIds();
 
   /**
    * Insert the video immediately after the currently playing track,
-   * before any recommendations/suggestions.
+   * before any recommendations/suggestions. Marks it as pinned so
+   * the auto-queue hook never displaces it.
    */
   const addNext = useCallback(
     (card: CardVideo) => {
       const toAdd = cardVideoToVideo(card);
 
-      // Remove any existing entry for this video to avoid duplicates
+      // Remove any existing entry to avoid duplicates; unpin old position
+      unpin(card.videoId);
       const without = playlist.filter((v) => v.videoId !== card.videoId);
 
-      // Find where the current song sits and insert right after it
       const currentIdx = without.findIndex(
         (v) => v.videoId === currentVideo?.videoId,
       );
@@ -74,8 +71,7 @@ export const useQueueVideo = () => {
         ...without.slice(insertAt),
       ];
 
-      // Update playlist first, then immediately sync nextVideoId so the
-      // player knows to play this track when the current one ends
+      pin(card.videoId);
       setPlaylist(next);
       if (currentVideo) {
         setPreviousNextVideos(getPreviousAndNextVideoId(next, currentVideo.videoId));
@@ -87,20 +83,21 @@ export const useQueueVideo = () => {
         autoClose: 3000,
       });
     },
-    [currentVideo, playlist, setPlaylist, setPreviousNextVideos],
+    [currentVideo, playlist, setPlaylist, setPreviousNextVideos, pin, unpin],
   );
 
   /**
-   * Append the video at the very end of the queue.
+   * Append the video at the very end of the queue. Marks it as pinned.
    */
   const addLast = useCallback(
     (card: CardVideo) => {
       const toAdd = cardVideoToVideo(card);
 
-      // Remove duplicates, then push to end
+      unpin(card.videoId);
       const without = playlist.filter((v) => v.videoId !== card.videoId);
       const next = [...without, toAdd];
 
+      pin(card.videoId);
       setPlaylist(next);
       if (currentVideo) {
         setPreviousNextVideos(getPreviousAndNextVideoId(next, currentVideo.videoId));
@@ -112,8 +109,23 @@ export const useQueueVideo = () => {
         autoClose: 3000,
       });
     },
-    [currentVideo, playlist, setPlaylist, setPreviousNextVideos],
+    [currentVideo, playlist, setPlaylist, setPreviousNextVideos, pin, unpin],
   );
 
-  return { addNext, addLast };
+  /**
+   * Remove a video from the queue entirely (both pinned and auto-suggested).
+   */
+  const removeFromQueue = useCallback(
+    (videoId: string) => {
+      unpin(videoId);
+      const next = playlist.filter((v) => v.videoId !== videoId);
+      setPlaylist(next);
+      if (currentVideo) {
+        setPreviousNextVideos(getPreviousAndNextVideoId(next, currentVideo.videoId));
+      }
+    },
+    [currentVideo, playlist, setPlaylist, setPreviousNextVideos, unpin],
+  );
+
+  return { addNext, addLast, removeFromQueue };
 };

@@ -10,7 +10,7 @@ import {
   useFollowedArtists,
   useSetFollowedArtists,
 } from "../providers/FollowedArtists";
-import { AM_ARTIST_PREFIX, isAppleMusicArtistId, getItunesArtistId } from "../services/appleMusic";
+import { isAppleMusicArtistId, getItunesArtistId } from "../services/appleMusic";
 
 interface ButtonFollowArtistProps {
   authorId: string;

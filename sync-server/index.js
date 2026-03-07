@@ -28,6 +28,8 @@
 "use strict";
 
 const http    = require("http");
+const fs      = require("fs");
+const path    = require("path");
 const express = require("express");
 const { WebSocketServer, OPEN } = require("ws");
 
@@ -87,15 +89,89 @@ const wsClients = new Map();
 const sseClients = new Map();
 
 /**
- * linkedBy: Map<deviceCode, Set<deviceCode>>
- * Tracks which devices have declared this code as one of their linkedCodes.
- * Used to deliver presence/sync to devices that haven't fully paired yet.
+ * confirmedPairs: Map<deviceCode, Set<deviceCode>>
+ * Tracks mutually confirmed pairings. Both directions are always set together.
+ * Only devices in each other's confirmedPairs set can exchange presence/sync data.
+ * Persisted to PAIRS_FILE so pairings survive server restarts.
  */
-const linkedBy = new Map();
+const PAIRS_FILE      = path.join(process.env.DATA_DIR || __dirname, "confirmed-pairs.json");
+const DELETIONS_FILE  = path.join(process.env.DATA_DIR || __dirname, "pending-deletions.json");
 
-function addLinkedBy(targetCode, fromCode) {
-  if (!linkedBy.has(targetCode)) linkedBy.set(targetCode, new Set());
-  linkedBy.get(targetCode).add(fromCode);
+const confirmedPairs = new Map();
+
+/**
+ * pendingDeletions: Map<targetCode, Array<{playlistSyncId, playlistTitle, videoId, fromCode, deletedAt}>>
+ * Stores deletion events for offline devices. Flushed to the device on reconnect.
+ * Persisted to DELETIONS_FILE so they survive server restarts.
+ */
+const pendingDeletions = new Map();
+
+// Load persisted pairs on startup
+try {
+  if (fs.existsSync(PAIRS_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(PAIRS_FILE, "utf8"));
+    for (const [code, peers] of Object.entries(raw)) {
+      confirmedPairs.set(code, new Set(peers));
+    }
+    log.info("pairs:loaded", { count: confirmedPairs.size, file: PAIRS_FILE });
+  }
+} catch (err) {
+  log.warn("pairs:load-failed", { err: String(err) });
+}
+
+// Load persisted pending deletions on startup
+try {
+  if (fs.existsSync(DELETIONS_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(DELETIONS_FILE, "utf8"));
+    for (const [code, items] of Object.entries(raw)) {
+      if (Array.isArray(items) && items.length) pendingDeletions.set(code, items);
+    }
+    log.info("deletions:loaded", { count: pendingDeletions.size, file: DELETIONS_FILE });
+  }
+} catch (err) {
+  log.warn("deletions:load-failed", { err: String(err) });
+}
+
+function persistPairs() {
+  try {
+    const obj = {};
+    for (const [code, peers] of confirmedPairs) {
+      obj[code] = [...peers];
+    }
+    fs.writeFileSync(PAIRS_FILE, JSON.stringify(obj, null, 2), "utf8");
+  } catch (err) {
+    log.warn("pairs:persist-failed", { err: String(err) });
+  }
+}
+
+function persistDeletions() {
+  try {
+    const obj = {};
+    for (const [code, items] of pendingDeletions) {
+      obj[code] = items;
+    }
+    fs.writeFileSync(DELETIONS_FILE, JSON.stringify(obj, null, 2), "utf8");
+  } catch (err) {
+    log.warn("deletions:persist-failed", { err: String(err) });
+  }
+}
+
+function addConfirmedPair(codeA, codeB) {
+  if (!confirmedPairs.has(codeA)) confirmedPairs.set(codeA, new Set());
+  if (!confirmedPairs.has(codeB)) confirmedPairs.set(codeB, new Set());
+  confirmedPairs.get(codeA).add(codeB);
+  confirmedPairs.get(codeB).add(codeA);
+  persistPairs();
+}
+
+function removeConfirmedPair(codeA, codeB) {
+  confirmedPairs.get(codeA)?.delete(codeB);
+  confirmedPairs.get(codeB)?.delete(codeA);
+  persistPairs();
+}
+
+function arePaired(codeA, codeB) {
+  return confirmedPairs.get(codeA)?.has(codeB) ?? false;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -370,23 +446,43 @@ wss.on("connection", (ws, req) => {
         registerWs(deviceCode, ws);
         ws.send(JSON.stringify({ type: "registered", deviceCode }));
         log.info("ws:registered", { code: deviceCode, ip: req.socket.remoteAddress });
-        // When a device registers, tell it about all currently-connected peers
-        // (with their cached presence so it instantly knows what they're playing),
-        // and tell each peer that this device just came online.
+
+        // Flush any pending video deletions queued while this device was offline.
+        // Must happen AFTER registerWs so deliver() finds the socket.
+        const pendingDels = pendingDeletions.get(deviceCode);
+        if (pendingDels && pendingDels.length) {
+          for (const del of pendingDels) {
+            deliver(deviceCode, {
+              type: "playlist:video:delete",
+              fromCode: del.fromCode,
+              playlistSyncId: del.playlistSyncId,
+              playlistTitle:  del.playlistTitle,
+              videoId: del.videoId,
+              ts: del.deletedAt,
+            });
+          }
+          log.info("deletions:flushed", { to: deviceCode, count: pendingDels.length });
+          pendingDeletions.delete(deviceCode);
+          persistDeletions();
+        }
+
+        // Only notify devices that have a confirmed mutual pairing with this device.
+        // Never broadcast to all connected devices — that would leak presence to strangers.
         const now = new Date().toISOString();
-        for (const [otherCode] of wsClients) {
-          if (otherCode === deviceCode) continue;
-          // Notify existing peer that this device is back online
+        const peers = confirmedPairs.get(deviceCode) ?? new Set();
+        for (const otherCode of peers) {
+          if (!wsClients.has(otherCode)) continue;
+          // Notify the paired peer that this device is back online
           deliver(otherCode, { type: "peer:online", fromCode: deviceCode, ts: now });
-          // Tell the newly-connected device about this peer + their current presence
+          // Tell this device about its paired peer + their current presence
           const cachedPresence = presence.get(otherCode) ?? null;
           ws.send(JSON.stringify({ type: "peer:online", fromCode: otherCode, presence: cachedPresence, ts: now }));
         }
         break;
       }
 
-      // Bidirectional pairing: Device A sends pair:request targeting Device B.
-      // Server relays it to B so B can auto-add A to its linked list.
+      // Relay pair request to target device. Does NOT add to confirmedPairs yet —
+      // that only happens when the target explicitly sends pair:accept.
       case "pair:request": {
         if (!deviceCode) return;
         const { targetCode, senderName, senderPlatform } = msg;
@@ -403,6 +499,41 @@ wss.on("connection", (ws, req) => {
         break;
       }
 
+      // Target device accepted the pair request — add to confirmedPairs and notify both sides.
+      case "pair:accept": {
+        if (!deviceCode) return;
+        const { targetCode, acceptorName } = msg;
+        if (!targetCode) return;
+        addConfirmedPair(deviceCode, targetCode);
+        // Notify the requester that pairing is confirmed, including our name so
+        // they can display a meaningful label instead of a generated fallback.
+        deliver(targetCode, {
+          type: "pair:confirmed",
+          fromCode: deviceCode,
+          acceptorName: acceptorName || null,
+          ts: new Date().toISOString(),
+        });
+        // Also confirm back to the acceptor (they already know our name from pair:request)
+        ws.send(JSON.stringify({ type: "pair:confirmed", fromCode: targetCode, ts: new Date().toISOString() }));
+        log.info("ws:pair:accepted", { acceptor: deviceCode, requester: targetCode });
+        break;
+      }
+
+      // Either device revokes — remove from confirmedPairs and notify the other side.
+      case "pair:revoke": {
+        if (!deviceCode) return;
+        const { targetCode } = msg;
+        if (!targetCode) return;
+        removeConfirmedPair(deviceCode, targetCode);
+        deliver(targetCode, {
+          type: "pair:revoked",
+          fromCode: deviceCode,
+          ts: new Date().toISOString(),
+        });
+        log.info("ws:pair:revoked", { by: deviceCode, target: targetCode });
+        break;
+      }
+
       // ── Presence broadcast ────────────────────────────────────────────────
       case "presence:update": {
         if (!deviceCode) return;
@@ -410,33 +541,16 @@ wss.on("connection", (ws, req) => {
         if (state) {
           presence.set(deviceCode, { ...state, ts: new Date().toISOString() });
         }
-        // null presence = heartbeat: device is online but not playing. Keep last presence.
-        // Don't delete presence on null - just means "nothing playing right now"
         const targets = Array.isArray(msg.linkedCodes) ? msg.linkedCodes : [];
-        // Register reverse links so the server knows who is linked to whom
-        for (const code of targets) addLinkedBy(code, deviceCode);
-        // Deliver to explicit targets
-        const delivered = new Set();
+        // Only deliver to devices that have a confirmed mutual pairing
         for (const code of targets) {
+          if (!arePaired(deviceCode, code)) continue;
           deliver(code, {
             type: "presence:update",
             fromCode: deviceCode,
             presence: state,
             ts: new Date().toISOString(),
           });
-          delivered.add(code);
-        }
-        // Also deliver to any device that has declared this device as linked
-        const reverseTargets = linkedBy.get(deviceCode) ?? new Set();
-        for (const code of reverseTargets) {
-          if (!delivered.has(code)) {
-            deliver(code, {
-              type: "presence:update",
-              fromCode: deviceCode,
-              presence: state,
-              ts: new Date().toISOString(),
-            });
-          }
         }
         log.debug("ws:presence", { from: deviceCode, targets: targets.length });
         break;
@@ -453,33 +567,54 @@ wss.on("connection", (ws, req) => {
           expiresAt: Date.now() + SYNC_TTL,
         });
         const targets = Array.isArray(linkedCodes) ? linkedCodes : [];
-        for (const code of targets) addLinkedBy(code, deviceCode);
-        const syncDelivered = new Set();
         let delivered = 0;
+        // Only deliver to devices with a confirmed mutual pairing
         for (const code of targets) {
+          if (!arePaired(deviceCode, code)) continue;
           delivered += deliver(code, {
             type: "sync:data",
             fromCode: deviceCode,
             payload,
             ts: new Date().toISOString(),
           });
-          syncDelivered.add(code);
-        }
-        // Also push to any device that listed this one as linked
-        const reverseTargets = linkedBy.get(deviceCode) ?? new Set();
-        for (const code of reverseTargets) {
-          if (!syncDelivered.has(code)) {
-            delivered += deliver(code, {
-              type: "sync:data",
-              fromCode: deviceCode,
-              payload,
-              ts: new Date().toISOString(),
-            });
-          }
         }
         log.info("ws:sync:push", { from: deviceCode, targets: targets.length, delivered });
         // Ack
         ws.send(JSON.stringify({ type: "sync:ack", delivered, ts: new Date().toISOString() }));
+        break;
+      }
+
+      // ── Playlist video deletion propagation ───────────────────────────────
+      // Device A deleted a video. If target is online, deliver immediately.
+      // If offline, queue in pendingDeletions for flush on their next reconnect.
+      case "playlist:video:delete": {
+        if (!deviceCode) return;
+        const { targetCode: delTargetCode, playlistSyncId, playlistTitle, videoId } = msg;
+        if (!delTargetCode || !videoId) return;
+        if (!arePaired(deviceCode, delTargetCode)) return;
+        const deleteMsg = {
+          type: "playlist:video:delete",
+          fromCode: deviceCode,
+          playlistSyncId: playlistSyncId || "",
+          playlistTitle:  playlistTitle  || "",
+          videoId,
+          ts: new Date().toISOString(),
+        };
+        const reached = deliver(delTargetCode, deleteMsg);
+        if (reached === 0) {
+          // Target is offline — queue for later delivery on their next reconnect
+          if (!pendingDeletions.has(delTargetCode)) pendingDeletions.set(delTargetCode, []);
+          pendingDeletions.get(delTargetCode).push({
+            playlistSyncId: playlistSyncId || "",
+            playlistTitle:  playlistTitle  || "",
+            videoId,
+            fromCode: deviceCode,
+            deletedAt: new Date().toISOString(),
+          });
+          persistDeletions();
+          log.debug("deletion:queued", { for: delTargetCode, videoId });
+        }
+        log.info("ws:video:delete", { from: deviceCode, to: delTargetCode, videoId, reached });
         break;
       }
 
@@ -509,13 +644,14 @@ wss.on("connection", (ws, req) => {
     if (deviceCode) {
       unregisterWs(deviceCode, ws);
       log.info("ws:close", { code: deviceCode, closeCode: code, reason: reason.toString() });
-      // If this device has NO remaining connections, notify all other devices it's offline
+      // Only notify confirmed paired devices that this device went offline
       if (!wsClients.has(deviceCode)) {
         const now = new Date().toISOString();
-        for (const [otherCode] of wsClients) {
+        const peers = confirmedPairs.get(deviceCode) ?? new Set();
+        for (const otherCode of peers) {
           deliver(otherCode, { type: "peer:offline", fromCode: deviceCode, ts: now });
         }
-        log.debug("ws:peer-offline-broadcast", { code: deviceCode });
+        log.debug("ws:peer-offline-broadcast", { code: deviceCode, notified: peers.size });
       }
     }
   });

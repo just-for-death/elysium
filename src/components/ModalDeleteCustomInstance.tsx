@@ -7,7 +7,7 @@ import { db } from "../database";
 import { useSetSettings, useSettings } from "../providers/Settings";
 import type { CustomInstance } from "../types/interfaces/Instance";
 import type { Settings } from "../types/interfaces/Settings";
-import { ButtonDeleteCustomInstance } from "./ButtonDeleteustomInstance";
+import { ButtonDeleteCustomInstance } from "./ButtonDeleteCustomInstance";
 import { Modal } from "./Modal";
 
 export const ModalDeleteCustomInstance = memo(

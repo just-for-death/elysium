@@ -3,6 +3,7 @@ import type { FC, ReactNode } from "react";
 
 import classes from "./CardImage.module.css";
 import { Image } from "./Image";
+import { sanitizeThumbnailUrl } from "../utils/cleanVideoThumbnailsUrl";
 
 interface CardImageProps {
   src: string;
@@ -17,8 +18,11 @@ export const CardImage: FC<CardImageProps> = ({
   domain = "",
   children,
 }) => {
-  const domainUrl =
-    src.startsWith("https") || src.startsWith("//") ? "" : domain;
+  // sanitizeThumbnailUrl handles all cases:
+  // - already-absolute URLs (no domain prepended)
+  // - relative paths (domain prepended correctly)
+  // - malformed double-URL artefacts stored in the DB (extracted and fixed)
+  const safeSrc = sanitizeThumbnailUrl(src, domain);
 
   return (
     <Flex
@@ -27,7 +31,7 @@ export const CardImage: FC<CardImageProps> = ({
       justify="flex-end"
     >
       <Image
-        src={`${domainUrl}${src}`}
+        src={safeSrc}
         alt={title}
         className={classes.image}
         loading="lazy"

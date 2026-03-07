@@ -1,19 +1,24 @@
-/* ── Compact bottom tab bar - Spotify inspired ─────────────────────── */
+/* ── Bottom tab bar ───────────────────────────────────────────────────────── */
 
 .bar {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
+  /* Taller on iPad for thumb reach */
+  height: calc(62px + env(safe-area-inset-bottom, 0px));
   display: flex;
   align-items: stretch;
-  background: rgba(6, 13, 15, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(255,255,255,0.08);
+  background: rgba(6, 13, 15, 0.97);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   z-index: 100;
+  /* iOS safe area — home indicator */
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Firefox Android: hardware-accelerated compositor layer */
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 .tab {
@@ -22,25 +27,45 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 4px;
   background: none;
   border: none;
   cursor: pointer;
-  color: #727272;
-  transition: color 0.15s ease, transform 0.1s ease;
+  color: rgba(255, 255, 255, 0.45);
+  transition: color 0.15s ease;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  padding: 0;
+  padding: 0 4px;
   min-width: 0;
+  /* 44pt minimum touch target — Apple HIG + Material */
+  min-height: 44px;
   position: relative;
+  /* Active indicator dot */
+}
+
+.tab::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 20px;
+  height: 2px;
+  border-radius: 1px;
+  background: #2ab5a5;
+  transition: transform 0.2s cubic-bezier(0.34, 1.02, 0.64, 1);
+}
+
+.tab[data-active="true"]::after {
+  transform: translateX(-50%) scaleX(1);
 }
 
 .tab:active {
-  transform: scale(0.95);
+  transform: scale(0.92);
 }
 
 .tab[data-active="true"] {
-  color: var(--sp-accent, #2ab5a5);
+  color: #2ab5a5;
 }
 
 .label {
@@ -50,18 +75,34 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 60px;
-  font-family: Plus Jakarta Sans, sans-serif;
+  max-width: 68px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+  letter-spacing: 0.01em;
 }
 
-/* ── More sheet ─────────────────────────────────────────────────────── */
+/* ── iPad: slightly bigger labels ─────────────────────────────────────────── */
+@media (min-width: 768px) {
+  .bar {
+    height: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+  .label {
+    font-size: 11px;
+    max-width: 80px;
+  }
+  .tab {
+    gap: 5px;
+  }
+}
+
+/* ── More sheet ─────────────────────────────────────────────────────────────── */
 
 .sheetOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.55);
   z-index: 200;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
 .sheet {
@@ -69,45 +110,99 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: #282828;
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
+  background: #1a2428;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
   z-index: 201;
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-  box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.7);
+  animation: sheetUp 0.28s cubic-bezier(0.34, 1.02, 0.64, 1) both;
+}
+
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0);    }
 }
 
 .sheetHandle {
   width: 36px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255,255,255,0.2);
-  margin: 12px auto 4px;
+  background: rgba(255, 255, 255, 0.18);
+  margin: 14px auto 0;
+}
+
+.sheetTitle {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 10px 0 12px;
+  font-family: "Plus Jakarta Sans", sans-serif;
+}
+
+.sheetGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 0 12px;
+}
+
+@media (min-width: 768px) {
+  .sheetGrid {
+    grid-template-columns: repeat(5, 1fr);
+  }
 }
 
 .sheetItem {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 13px 20px;
-  background: none;
-  border: none;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
   cursor: pointer;
-  width: 100%;
-  color: var(--sp-accent, #2ab5a5);
-  font-size: 15px;
-  font-weight: 500;
-  font-family: Plus Jakarta Sans, sans-serif;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: "Plus Jakarta Sans", sans-serif;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
-  text-align: left;
-  transition: background 0.15s ease;
+  text-align: center;
+  transition: background 0.15s ease, color 0.15s ease;
+  min-height: 72px;
 }
 
 .sheetItem:active {
-  background: rgba(255,255,255,0.08);
+  background: rgba(255, 255, 255, 0.12);
+  transform: scale(0.95);
 }
 
 .sheetItem[data-active="true"] {
-  color: var(--sp-accent);
+  background: rgba(42, 181, 165, 0.15);
+  color: #2ab5a5;
+  border-color: rgba(42, 181, 165, 0.3);
+}
+
+.sheetItemIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.sheetItem[data-active="true"] .sheetItemIcon {
+  background: rgba(42, 181, 165, 0.2);
+}
+
+.sheetItemLabel {
+  line-height: 1.2;
 }

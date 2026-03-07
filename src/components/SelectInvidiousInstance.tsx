@@ -1,4 +1,4 @@
-import { Badge, Checkbox, Flex, Switch, Table } from "@mantine/core";
+import { Badge, Flex, Switch, Table } from "@mantine/core";
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -6,6 +6,7 @@ import { db } from "../database";
 import { useSetSettings, useSettings } from "../providers/Settings";
 import type { Instance } from "../types/interfaces/Instance";
 import type { Settings } from "../types/interfaces/Settings";
+import { normalizeDomain, sanitizeInstanceFields } from "../utils/invidiousInstance";
 import { ModalAddCustomInstance } from "./ModalAddCustomInstance";
 import { ModalDeleteCustomInstance } from "./ModalDeleteCustomInstance";
 
@@ -28,23 +29,23 @@ export const SelectInvidiousInstance = memo(() => {
               <ModalAddCustomInstance />
             </Flex>
           </Table.Th>
-          <Table.Th style={{ width: 130 }}>{t("invidious.type")}</Table.Th>
-          <Table.Th style={{ width: 130 }}>{t("invidious.actions")}</Table.Th>
-          <Table.Th style={{ width: 130 }}></Table.Th>
+          <Table.Th style={{ width: 100 }}>{t("invidious.type")}</Table.Th>
+          <Table.Th style={{ width: 120 }}>{t("invidious.actions")}</Table.Th>
+          <Table.Th style={{ width: 120 }}>{t("invidious.default")}</Table.Th>
           {hasCustomInstances ? (
-            <Table.Th style={{ width: 130 }}></Table.Th>
+            <Table.Th style={{ width: 60 }}></Table.Th>
           ) : null}
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
         {hasCustomInstances
           ? settings.customInstances.map((instance) => (
-              <TableRow key={instance.domain} instance={instance} custom />
+              <TableRow key={normalizeDomain(instance.domain)} instance={instance} custom />
             ))
           : null}
         {settings.instances.map((instance) => (
           <TableRow
-            key={instance.domain}
+            key={normalizeDomain(instance.domain)}
             instance={instance}
             lastCell={hasCustomInstances}
           />
@@ -70,32 +71,39 @@ const TableRow = memo(
       keyPrefix: "settings.general",
     });
 
-    const isCurrent = settings.currentInstance?.domain === instance.domain;
-    const isDefault = settings.defaultInstance?.domain === instance.domain;
+    // Normalize both sides so "https://foo.com" and "foo.com" compare equal
+    const instanceDomain = normalizeDomain(instance.domain);
+    const isCurrent = normalizeDomain(settings.currentInstance?.domain) === instanceDomain;
+    const isDefault = normalizeDomain(settings.defaultInstance?.domain) === instanceDomain;
 
     const handleInstanceChange = (
       key: "currentInstance" | "defaultInstance",
       value: Instance | null,
     ) => {
+      // Always sanitize before saving to avoid storing protocol prefix in domain
+      const sanitized = value ? sanitizeInstanceFields(value) : null;
       db.update("settings", { ID: 1 }, (data: Settings) => ({
         ...data,
-        [key]: value,
+        [key]: sanitized,
       }));
       db.commit();
       setSettings((previousState) => ({
         ...previousState,
-        [key]: value,
+        [key]: sanitized,
       }));
     };
+
+    // Display domain without protocol prefix
+    const displayDomain = instanceDomain;
 
     return (
       <Table.Tr
         role="listitem"
-        aria-label={instance.domain}
+        aria-label={displayDomain}
         aria-current={isCurrent}
       >
         <Table.Td>
-          {instance.flag} {instance.domain}
+          {instance.flag} {displayDomain}
           {isCurrent ? (
             <Badge size="xs" ml="xs" color="lime">
               {t("invidious.current")}
@@ -121,10 +129,10 @@ const TableRow = memo(
             onChange={() => handleInstanceChange("currentInstance", instance)}
           />
         </Table.Td>
-        <Table.Td>
-          <Checkbox
+        <Table.Td style={{ textAlign: "center" }}>
+          <Switch
             checked={isDefault}
-            label={t("invidious.default")}
+            aria-label={t("invidious.default")}
             onChange={() =>
               handleInstanceChange(
                 "defaultInstance",

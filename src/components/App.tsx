@@ -19,6 +19,7 @@ import { NavigationContainer } from "../containers/Navigation";
 import { PlayerContainer } from "../containers/Player";
 import { FavoriteProvider } from "../providers/Favorite";
 import { FollowedArtistsProvider } from "../providers/FollowedArtists";
+import { FullscreenPlayerProvider } from "../providers/FullscreenPlayer";
 import { HistoryProvider } from "../providers/History";
 import { MantineProvider } from "../providers/Mantine";
 import { StableNavigateProvider } from "../providers/Navigate";
@@ -30,6 +31,7 @@ import { PresenceProvider } from "../providers/Presence";
 import { PreviousNextTrackProvider } from "../providers/PreviousNextTrack";
 import { SearchProvider } from "../providers/Search";
 import { SettingsProvider } from "../providers/Settings";
+import { SidebarCollapsedProvider } from "../providers/SidebarCollapsed";
 import { SpotlightProvider } from "../providers/Spotlight";
 import { TrendingFiltersProvider } from "../providers/TrendingFilters";
 import { VideoIframeVisibilityProvider } from "../providers/VideoIframeVisibility";
@@ -37,9 +39,11 @@ import { queryClient } from "../queryClient";
 import { userAgent } from "../utils/userAgent";
 import "./App.css";
 import { AppUpdate } from "./AppUpdate";
+import { PWAInstallBanner } from "./PWAInstallBanner";
 import { Main } from "./Main";
 import { Scripts } from "./Script";
 import { useNewReleaseCheck } from "../hooks/useNewReleaseCheck";
+import { useAutoQueue } from "../hooks/useAutoQueue";
 
 export const App = () => {
   useEffect(() => {
@@ -61,6 +65,8 @@ export const App = () => {
                           <PlayerPlaylistProvider>
                             <PlayerModeProvider>
                               <VideoIframeVisibilityProvider>
+                                <SidebarCollapsedProvider>
+                                <FullscreenPlayerProvider>
                                 <HistoryProvider>
                                   <PresenceProvider>
                                   <MantineProvider>
@@ -81,11 +87,14 @@ export const App = () => {
                                         <MobileNavigationContainer />
                                         <Scripts />
                                         <NewReleaseCheckHook />
+                                        <AutoQueueHook />
                                       </Flex>
                                     </AppShell>
                                   </MantineProvider>
                                   </PresenceProvider>
                                 </HistoryProvider>
+                                </FullscreenPlayerProvider>
+                                </SidebarCollapsedProvider>
                               </VideoIframeVisibilityProvider>
                             </PlayerModeProvider>
                           </PlayerPlaylistProvider>
@@ -96,9 +105,10 @@ export const App = () => {
                 </FavoriteProvider>
               </TrendingFiltersProvider>
             </SearchProvider>
-          </SettingsProvider>
+        </SettingsProvider>
         </StableNavigateProvider>
         <AppUpdate />
+        <PWAInstallBanner />
       </QueryClientProvider>
     </I18nextProvider>
   );
@@ -106,5 +116,10 @@ export const App = () => {
 
 const NewReleaseCheckHook = () => {
   useNewReleaseCheck();
+  return null;
+};
+
+const AutoQueueHook = () => {
+  useAutoQueue();
   return null;
 };

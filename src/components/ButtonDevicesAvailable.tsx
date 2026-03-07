@@ -4,7 +4,7 @@ import { IconDeviceDesktop } from "@tabler/icons-react";
 import { type FC, memo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { usePlayerAudio, usePlayerVideo } from "../providers/Player";
+import { useAudioElement, usePlayerVideo } from "../providers/Player";
 import { useRemoteDevices } from "../providers/Settings";
 import { sendToRemoteDevice } from "../services/remotePlay";
 import type { RemoteDevice } from "../types/interfaces/Settings";
@@ -18,7 +18,7 @@ export const ButtonDevicesAvailable: FC<ButtonDevicesAvailableProps> = memo(
   ({ variant }) => {
     const remoteDevices = useRemoteDevices();
     const { video } = usePlayerVideo();
-    const playerAudio = usePlayerAudio();
+    const getAudioEl = useAudioElement();
     const { t } = useTranslation();
 
     if (!remoteDevices.length) {
@@ -40,8 +40,8 @@ export const ButtonDevicesAvailable: FC<ButtonDevicesAvailableProps> = memo(
         message: t("remote.device.send.notification.message"),
       });
 
-      // @ts-ignore
-      const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
+      const audio = getAudioEl();
+      if (!audio) return;
 
       if (!audio.paused) {
         audio.pause();

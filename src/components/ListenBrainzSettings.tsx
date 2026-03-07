@@ -13,7 +13,6 @@ import {
   Stack,
   Switch,
   Text,
-  Title,
 } from "@mantine/core";
 import { showNotification } from "@mantine/notifications";
 import { IconBrandLastfm, IconCheck, IconX } from "@tabler/icons-react";

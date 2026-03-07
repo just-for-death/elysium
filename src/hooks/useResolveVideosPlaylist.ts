@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import {
   getFavoritePlaylist,
   getPlaylist as getLocalPlaylist,
+  getSettings,
 } from "../database/utils";
 import { queryClient } from "../queryClient";
 import type { Playlist } from "../types/interfaces/Playlist";
@@ -23,6 +24,20 @@ export const useResolveVideosPlaylist = () => {
   const location = useLocation();
 
   const getVideosPlaylist = () => {
+    // When any auto-queue mode (other than "invidious" and "off") is enabled,
+    // always return null so that usePlayVideo falls through to [currentVideo].
+    // Without this, pages like Most Popular / Trending fill the queue with their
+    // entire video list, bypassing the auto-queue hook.
+    // Explicit playlists (/playlists/…) are still respected.
+    const settings = getSettings();
+    const queueMode: string = (settings as any).queueMode ?? "off";
+    const legacyOllama = settings.ollamaEnabled && !!settings.ollamaUrl;
+    const effectiveMode = queueMode !== "off" ? queueMode : legacyOllama ? "ollama" : "off";
+    const autoQueueActive = effectiveMode !== "off" && effectiveMode !== "invidious";
+    if (autoQueueActive && !location.pathname.includes("/playlists/")) {
+      return null;
+    }
+
     let videos: Video[] | null = null;
 
     if (location.pathname.includes("/playlists/")) {

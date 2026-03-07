@@ -1,21 +1,104 @@
+/* ── Mobile mini-player bar ───────────────────────────────────────────────── */
+
 .container {
-  position: absolute;
-  bottom: rem(50px);
-  padding-bottom: rem(8px);
+  /* fixed so it always floats above the bottom nav regardless of scroll/layout */
+  position: fixed;
+  bottom: calc(62px + env(safe-area-inset-bottom, 0px));
   left: 8px;
   right: 8px;
-  z-index: 2;
-  border-radius: 8px;
+  z-index: 150;
+  border-radius: 14px;
   overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+  background: rgba(18, 28, 30, 0.97);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.08);
+  cursor: pointer;
+  will-change: transform;
+  transform: translateZ(0);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  /* Firefox Android: force GPU compositing layer */
+  -webkit-transform: translateZ(0);
 }
 
+.container:active {
+  transform: scale(0.98) translateZ(0);
+}
+
+/* iPad */
+@media (min-width: 768px) {
+  .container {
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    right: 16px;
+    border-radius: 16px;
+  }
+}
+
+/* ── Progress bar ─────────────────────────────────────────────────────────── */
+.progress {
+  width: 100%;
+}
+
+/* ── Content row ──────────────────────────────────────────────────────────── */
 .content {
-  padding: 10px 16px;
-  padding-right: var(--mantine-spacing-md);
-  padding-left: var(--mantine-spacing-md);
-  gap: var(--mantine-spacing-xs);
-  text-align: center;
+  padding: 10px 12px;
+  gap: 10px;
   justify-content: space-between;
   align-items: center;
+  display: flex;
+}
+
+/* ── Thumbnail ────────────────────────────────────────────────────────────── */
+.thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.08);
+  cursor: pointer;
+}
+
+@media (min-width: 768px) {
+  .thumb {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+  }
+}
+
+/* ── Track info ───────────────────────────────────────────────────────────── */
+.trackInfo {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+  padding-right: 4px;
+}
+
+/* ── Controls area (play + fullscreen) ────────────────────────────────────── */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Fullscreen button — large, always tappable ───────────────────────────── */
+.fsBtn {
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 10px !important;
+  background: rgba(42, 181, 165, 0.18) !important;
+  color: #2ab5a5 !important;
+  flex-shrink: 0;
+}
+
+.fsBtn:active {
+  background: rgba(42, 181, 165, 0.35) !important;
+  transform: scale(0.92);
+}
+
+@media (min-width: 768px) {
+  .fsBtn {
+    width: 44px !important;
+    height: 44px !important;
+  }
 }

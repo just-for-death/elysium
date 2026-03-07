@@ -17,7 +17,39 @@ export const search = async ({
 }: SearchParams): Promise<Card[]> => {
   // Apple Music search is handled client-side via the iTunes API
   if (params.service === "apple_music") {
-    return searchAppleMusic(params.q) as Promise<Card[]>;
+    try {
+      const results = await searchAppleMusic(params.q);
+      if (results.length > 0) return results as Card[];
+    } catch {
+      // fall through to Invidious
+    }
+    // If Apple Music fails (403/rate-limited), fall back to Invidious search
+    const instance = getCurrentInstance();
+    const uri = `${normalizeInstanceUri(instance.uri)}/api/v1/search`;
+    const url = `${uri}?${qs.stringify({ q: params.q, type: "video", sort_by: "relevance", page: 1 })}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (!Array.isArray(data)) return [];
+      // Map raw Invidious video objects to CardVideo shape
+      return data
+        .filter((v: any) => v.type === "video" && v.videoId)
+        .map((v: any): Card => ({
+          type: "video",
+          videoId: v.videoId,
+          title: v.title ?? "",
+          thumbnail: v.videoThumbnails?.[0]?.url
+            ? `/vi/${v.videoId}/mqdefault.jpg`
+            : `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+          liveNow: v.liveNow ?? false,
+          lengthSeconds: v.lengthSeconds ?? 0,
+          videoThumbnails: v.videoThumbnails ?? [],
+        }));
+    } catch (err) {
+      log.warn("search: Apple Music + Invidious both failed", { err });
+      return [];
+    }
   }
 
   const instance = getCurrentInstance();

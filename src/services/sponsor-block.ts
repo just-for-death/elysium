@@ -18,7 +18,8 @@ export const getSponsorBlockSegments = async (
   const base = process.env.REACT_APP_API_URL ?? "";
   const url = `${base}/api/sponsorBlock?${params}`;
   try {
-    const response = await fetch(url);
+    // 3s timeout — SponsorBlock must never delay audio starting
+    const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
     if (!response.ok) return { segments: [] };
     const text = await response.text();
     try {

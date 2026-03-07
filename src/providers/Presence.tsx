@@ -20,6 +20,7 @@ interface PresenceContextValue {
   wsConnected:     boolean;
   devicePresences: Record<string, DevicePresence>;
   pushInstantSync: () => void;
+  sendVideoDelete: (playlistSyncId: string, playlistTitle: string, videoId: string) => void;
 }
 
 const PresenceContext = createContext<PresenceContextValue>({
@@ -27,6 +28,7 @@ const PresenceContext = createContext<PresenceContextValue>({
   wsConnected:     false,
   devicePresences: {},
   pushInstantSync: () => {},
+  sendVideoDelete: () => {},
 });
 
 export const PresenceProvider: FC<PropsWithChildren> = ({ children }) => {

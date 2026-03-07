@@ -31,6 +31,7 @@ interface NavbarLinkProps {
   active?: boolean;
   onClick?(): void;
   activePath?: RoutePath;
+  collapsed?: boolean;
 }
 
 const useNavbarLink = (routeName: string, callback?: () => void) => {
@@ -49,28 +50,37 @@ const useNavbarLink = (routeName: string, callback?: () => void) => {
 };
 
 export const NavbarLink = memo(
-  ({ icon: Icon, label, onClick, activePath }: NavbarLinkProps) => {
+  ({ icon: Icon, label, onClick, activePath, collapsed }: NavbarLinkProps) => {
     const link = useNavbarLink(activePath as RoutePath);
     const theme = useMantineTheme();
     const isSmall = useMediaQuery(
       `screen and (max-width: ${theme.breakpoints.sm})`,
     );
-    const isHidden = useMediaQuery("screen and (max-width: 767px)");
 
-    return (
+    const btn = (
       <UnstyledButton
         onClick={onClick ?? link.onClick}
-        className={classes.link}
+        className={`${classes.link} ${collapsed ? classes.linkCollapsed : ""}`}
         data-active={link.active}
         aria-label={label}
         aria-selected={link.active}
       >
         <Icon stroke={link.active ? 2 : 1.5} size={20} className={classes.icon} />
-        {!isSmall && (
+        {!collapsed && !isSmall && (
           <span className={classes.label}>{label}</span>
         )}
       </UnstyledButton>
     );
+
+    if (collapsed) {
+      return (
+        <Tooltip label={label} position="right" withArrow>
+          {btn}
+        </Tooltip>
+      );
+    }
+
+    return btn;
   },
 );
 
@@ -92,4 +102,3 @@ export const MobileNavbarLink = memo(
     );
   },
 );
-

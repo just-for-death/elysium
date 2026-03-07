@@ -20,9 +20,9 @@ import {
 import type { Instance } from "../types/interfaces/Instance";
 import type { RemoteDevice, Settings } from "../types/interfaces/Settings";
 import {
-  DEFAULT_INVIDIOUS_URI,
   getDefaultInstance,
-  normalizeInstanceUri,
+  normalizeDomain,
+  sanitizeInstanceFields,
 } from "../utils/invidiousInstance";
 import { stringValueIsEmpty } from "../utils/stringValueIsEmpty";
 
@@ -64,25 +64,35 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
       }
       if (!instances.length) return;
 
-      const currentInstance = (() => {
-        // Prefer yt.ikiagi.loseyourip.com (user's preferred default)
-        const preferred = instances.find(
-          (i) =>
-            i.domain === "yt.ikiagi.loseyourip.com" ||
-            i.uri === DEFAULT_INVIDIOUS_URI,
-        );
-        if (preferred) return preferred;
+      // Always read from DB directly to avoid stale closure bugs
+      const freshSettings = getSettings();
 
-        if (settings.defaultInstance) {
-          if (settings.defaultInstance.custom) {
-            return sanitizeInstance(settings.defaultInstance);
+      const currentInstance = (() => {
+        // 1. Respect the user's explicitly saved currentInstance
+        if (freshSettings.currentInstance) {
+          if (freshSettings.currentInstance.custom) {
+            return sanitizeInstanceFields(freshSettings.currentInstance);
           }
-          const isStillUp = instances.find(
-            (i) => i.domain === settings.defaultInstance?.domain,
+          const savedDomain = normalizeDomain(freshSettings.currentInstance.domain);
+          const stillValid = instances.find(
+            (i) => normalizeDomain(i.domain) === savedDomain,
           );
-          if (isStillUp) return sanitizeInstance(settings.defaultInstance);
+          if (stillValid) return sanitizeInstanceFields(freshSettings.currentInstance);
         }
 
+        // 2. Fall back to user's defaultInstance if set
+        if (freshSettings.defaultInstance) {
+          if (freshSettings.defaultInstance.custom) {
+            return sanitizeInstanceFields(freshSettings.defaultInstance);
+          }
+          const defaultDomain = normalizeDomain(freshSettings.defaultInstance.domain);
+          const isStillUp = instances.find(
+            (i) => normalizeDomain(i.domain) === defaultDomain,
+          );
+          if (isStillUp) return sanitizeInstanceFields(freshSettings.defaultInstance);
+        }
+
+        // 3. Last resort: pick from list
         const idx =
           instances.length === 1
             ? 0
@@ -102,7 +112,7 @@ export const SettingsProvider: FC<PropsWithChildren> = ({ children }) => {
       }));
       db.commit();
     },
-    [settings.defaultInstance, settings.instances.length],
+    [settings.instances.length],
   );
 
   useQuery("instances", () => fetchInvidiousInstances(), {
@@ -136,8 +146,3 @@ export const useRemoteDevices = () =>
 
 const generateRandomInteger = (min: number, max: number) =>
   Math.floor(min + Math.random() * (max - min + 1));
-
-const sanitizeInstance = (instance: Instance): Instance => ({
-  ...instance,
-  uri: normalizeInstanceUri(instance.uri) || instance.uri,
-});

@@ -225,7 +225,6 @@ const TransferListContainer: FC<TransferListContainerProps> = memo(
           message: t("notification.message"),
         });
       } catch (error) {
-        console.log(error);
         notifications.show({
           title: t("notification.error.title"),
           message: t("notification.error.message"),

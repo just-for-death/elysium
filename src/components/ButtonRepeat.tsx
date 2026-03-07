@@ -3,9 +3,9 @@ import { IconRepeat, IconRepeatOnce } from "@tabler/icons-react";
 import { type FC, memo } from "react";
 
 import {
-  usePlayerAudio,
-  usePlayerState,
-  useSetPlayerState,
+  useAudioElement,
+  usePlayerStatus,
+  useSetPlayerStatus,
 } from "../providers/Player";
 
 interface ButtonRepeatProps {
@@ -13,13 +13,13 @@ interface ButtonRepeatProps {
 }
 
 export const ButtonRepeat: FC<ButtonRepeatProps> = memo(({ iconSize }) => {
-  const playerState = usePlayerState();
-  const playerAudio = usePlayerAudio();
-  const setPlayerState = useSetPlayerState();
+  const playerState = usePlayerStatus();
+  const getAudioEl = useAudioElement();
+  const setPlayerState = useSetPlayerStatus();
 
   const handleClick = () => {
-    // @ts-ignore
-    const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
+    const audio = getAudioEl();
+    if (!audio) return;
     audio.loop = !playerState.repeat;
 
     setPlayerState((previousState) => ({

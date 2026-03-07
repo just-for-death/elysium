@@ -35,6 +35,7 @@ import { ButtonRepeat } from "./ButtonRepeat";
 import { ButtonShare } from "./ButtonShare";
 import classes from "./DrawerPlayer.module.css";
 import { ButtonVolume } from "./Player";
+import { ButtonStop } from "./ButtonStop";
 import { PlayerActions } from "./PlayerActions";
 import { PlayerBackground } from "./PlayerBackground";
 import { PlayerLoadingOverlay } from "./PlayerLoadingOverlay";
@@ -187,6 +188,7 @@ export const DrawerPlayerVideo = memo(() => {
         <Flex align="center" gap="xl">
           <ButtonRepeat iconSize={16} />
           <PlayerActions />
+          <ButtonStop iconSize={16} />
           <ButtonFavorite card={video as CardVideo} variant="transparent" />
         </Flex>
       </Flex>

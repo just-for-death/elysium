@@ -1,0 +1,67 @@
+/* ── Settings page ────────────────────────────────────────────────────────── */
+
+.page {
+  padding-bottom: 40px;
+}
+
+.section {
+  padding: 0 4px;
+}
+
+/* Accordion group — round first and last items */
+.accordionGroup {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.accordionGroup :global(.mantine-Accordion-item) {
+  background: var(--sp-surface);
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0 !important;
+  transition: background 0.15s ease;
+}
+
+.accordionGroup :global(.mantine-Accordion-item:last-child) {
+  border-bottom: none;
+}
+
+.accordionGroup :global(.mantine-Accordion-item[data-active]) {
+  background: rgba(42, 181, 165, 0.04);
+}
+
+.accordionGroup :global(.mantine-Accordion-control) {
+  padding: 14px 16px;
+  border-radius: 0;
+}
+
+.accordionGroup :global(.mantine-Accordion-control:hover) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.accordionGroup :global(.mantine-Accordion-panel) {
+  padding: 0 16px 16px;
+}
+
+.accordionGroup :global(.mantine-Accordion-chevron) {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* Sub-section label */
+.subLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-bottom: 6px;
+}
+
+/* Info cards */
+.infoCard {
+  background: var(--sp-surface);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 14px 16px;
+  margin-top: 8px;
+}

@@ -19,8 +19,8 @@ import { useTranslation } from "react-i18next";
 
 import { usePlayVideo } from "../hooks/usePlayVideo";
 import {
-  usePlayerAudio,
-  usePlayerState,
+  useAudioElement,
+  usePlayerStatus,
   usePlayerVideo,
 } from "../providers/Player";
 import type { CardVideo } from "../types/interfaces/Card";
@@ -49,9 +49,13 @@ function buildThumbnailSrc(
     getThumbnailQuality(video.videoThumbnails ?? [], "medium") ??
     "";
   if (!raw) return `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
-  if (raw.startsWith("https") || raw.startsWith("//")) return raw;
-  if (raw.startsWith("/") && instanceUri) return `${instanceUri.replace(/\/+$/, "")}${raw}`;
-  return raw;
+  // Normalize malformed protocol (https// -> https://)
+  const normalized = raw.replace(/^(https?):?\/\/(?!\/)/i, "$1://")
+                        .replace(/^(https?)\/\//i, "$1://");
+  if (normalized.startsWith("https://") || normalized.startsWith("http://") || normalized.startsWith("//")) return normalized;
+  if (normalized.startsWith("/") && instanceUri) return `${instanceUri.replace(/\/+$/, "")}${normalized}`;
+  // Last resort: ytimg direct
+  return `https://i.ytimg.com/vi/${video.videoId}/mqdefault.jpg`;
 }
 
 /** Img element with automatic YouTube CDN fallback */
@@ -118,7 +122,11 @@ const VideoCardImage: FC<{
 export const VideoCard: FC<VideoCardProps> = memo(
   ({ video, component = "div", currentInstanceUri }) => {
     const { handlePlay, loading } = usePlayVideo();
+    const { video: playingVideo } = usePlayerVideo();
     const { t } = useTranslation();
+    // Only show the loading spinner on the specific card being loaded —
+    // not on every card in the grid (loading is global to usePlayVideo).
+    const isThisCardLoading = loading && playingVideo?.videoId === video.videoId;
 
     return (
       <MCard
@@ -129,7 +137,7 @@ export const VideoCard: FC<VideoCardProps> = memo(
       >
         <CardPlaying videoId={video.videoId} />
         <HackedCardPress videoId={video.videoId} />
-        <LoadingOverlay visible={loading} />
+        <LoadingOverlay visible={isThisCardLoading} />
         <UnstyledButton
           style={{ width: "100%" }}
           onClick={() => handlePlay(video.videoId)}
@@ -211,14 +219,13 @@ const ButtonPlay = memo(({ onClick }: { onClick: () => void }) => {
 });
 
 const ButtonAudioPlayPause = memo(() => {
-  const playerAudio = usePlayerAudio();
-  const playerState = usePlayerState();
+  const getAudioEl = useAudioElement();
+  const playerState = usePlayerStatus();
   const { t } = useTranslation();
 
   const handlePlayPause = () => {
-    // @ts-ignore
-    const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
-
+    const audio = getAudioEl();
+    if (!audio) return;
     if (audio.paused) {
       audio.play();
     } else {
@@ -242,16 +249,15 @@ const ButtonAudioPlayPause = memo(() => {
 
 const CardPlaying = memo(({ videoId }: { videoId: string }) => {
   const { video } = usePlayerVideo();
-  const playerAudio = usePlayerAudio();
+  const getAudioEl = useAudioElement();
 
   if (video?.videoId !== videoId) {
     return null;
   }
 
   const handlePlayPause = () => {
-    // @ts-ignore
-    const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
-
+    const audio = getAudioEl();
+    if (!audio) return;
     if (audio.paused) {
       audio.play();
     } else {

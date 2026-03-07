@@ -23,12 +23,12 @@ import {
 import { useSetFavorite }            from "../providers/Favorite";
 import { useRefreshHistory }         from "../providers/History";
 import { useSetFollowedArtists, getFollowedArtists, addFollowedArtist } from "../providers/FollowedArtists";
-import { useSetPlaylists }           from "../providers/Playlist";
-import { usePlayerVideo, usePlayerState, useSetPlayerState } from "../providers/Player";
+import { usePlaylists, useSetPlaylists } from "../providers/Playlist";
+import { usePlayerVideo, usePlayerStatus, useSetPlayerStatus } from "../providers/Player";
 import { useSettings, useSetSettings } from "../providers/Settings";
 import { usePreviousNextVideos }     from "../providers/PreviousNextTrack";
 import { usePlayVideo }              from "./usePlayVideo";
-import { getMusicalDeviceName, resolveDeviceName } from "../utils/deviceName";
+import { resolveDeviceName } from "../utils/deviceName";
 import { presenceService } from "../services/presence";
 import type { PresenceState, SyncMessage, RemoteCommand } from "../services/presence";
 import { saveLastSyncAt }            from "../services/sync";
@@ -86,14 +86,39 @@ const mergePayload = (
     const remotePls = (remote.playlists ?? []).filter((p: any) => p.title !== "Favorites" && p.title !== "Cache");
     const localTitles = new Set(localPls.map((p: any) => p.title));
     for (const pl of remotePls) {
+      // 1. Match by syncId first — survives renames, prevents duplicates
+      if (pl.syncId) {
+        const byId = localPls.find((p: any) => p.syncId === pl.syncId);
+        if (byId) {
+          const localVideos = byId.videos ?? [];
+          const localVids = new Set(localVideos.map((v: any) => v.videoId));
+          const newVids   = (pl.videos ?? []).filter((v: any) => !localVids.has(v.videoId));
+          const merged    = [...localVideos, ...newVids];
+          const videosActuallyChanged = merged.length !== localVideos.length ||
+            merged.some((v: any, i: number) => v.videoId !== (localVideos as any[])[i]?.videoId);
+          if (videosActuallyChanged) {
+            updatePlaylistVideos(byId.title, merged as CardVideo[]);
+            updatedPlaylists++;
+          }
+          continue;
+        }
+      }
+      // 2. Fall back to title match (legacy playlists without syncId yet)
       if (!localTitles.has(pl.title)) {
         importPlaylist({ ...pl, type: "playlist", videoCount: pl.videos?.length ?? 0 });
         newPlaylists++;
       } else {
         const local = localPls.find((p: any) => p.title === pl.title);
-        const localVids = new Set((local?.videos ?? []).map((v: any) => v.videoId));
+        const localVideos = local?.videos ?? [];
+        const localVids = new Set(localVideos.map((v: any) => v.videoId));
         const newVids   = (pl.videos ?? []).filter((v: any) => !localVids.has(v.videoId));
-        if (newVids.length) { updatePlaylistVideos(pl.title, [...(local?.videos ?? []), ...newVids] as CardVideo[]); updatedPlaylists++; }
+        const merged    = [...localVideos, ...newVids];
+        const videosActuallyChanged = merged.length !== localVideos.length ||
+          merged.some((v: any, i: number) => v.videoId !== (localVideos as any[])[i]?.videoId);
+        if (videosActuallyChanged) {
+          updatePlaylistVideos(pl.title, merged as CardVideo[]);
+          updatedPlaylists++;
+        }
       }
     }
     if (newPlaylists > 0 || updatedPlaylists > 0) setters.setPlaylists(getPlaylists());
@@ -126,11 +151,12 @@ export const usePresence = () => {
   const setSettings = useSetSettings();
   const setFavorite = useSetFavorite();
   const setPlaylists = useSetPlaylists() as (p: Playlist[]) => void;
+  const playlists = usePlaylists();
   const refreshHistory = useRefreshHistory();
   const setFollowedArtists = useSetFollowedArtists();
   const { video, thumbnailUrl } = usePlayerVideo();
-  const playerState = usePlayerState();
-  const setPlayerState = useSetPlayerState();
+  const playerState = usePlayerStatus();
+  const setPlayerState = useSetPlayerStatus();
   const { videosIds } = usePreviousNextVideos();
   const { handlePlay } = usePlayVideo();
 
@@ -148,6 +174,16 @@ export const usePresence = () => {
   const myCode = deriveDeviceCode(settings.deviceId ?? "unknown");
   const linkedDevices: LinkedDevice[] = settings.linkedDevices ?? [];
   const linkedCodes = linkedDevices.map((d) => d.code);
+
+  // Ref kept in sync every render so handleMessage (which is only created once)
+  // always reads the current linked device list without needing to be recreated.
+  const linkedCodesRef = useRef<string[]>(linkedCodes);
+  linkedCodesRef.current = linkedCodes;
+
+  // Same pattern for settings — lets pair:request read current linkedDevices
+  // without relying on the stale closure captured at mount.
+  const settingsRef = useRef<any>(settings);
+  settingsRef.current = settings;
 
   // ── Per-device presence state ────────────────────────────────────────────
   const [devicePresences, setDevicePresences] = useState<Record<string, DevicePresence>>(() =>
@@ -235,6 +271,8 @@ export const usePresence = () => {
       // peer:online = another registered device just came online on the server
       case "peer:online": {
         const { fromCode, presence: peerPresence } = msg as any;
+        // Only process events from devices we have actually paired with
+        if (!linkedCodesRef.current.includes(fromCode)) break;
         setDevicePresences((prev) => {
           const existing = prev[fromCode] ?? { code: fromCode, name: fromCode, platform: "other", presence: null, online: false, lastSeen: "" };
           return {
@@ -257,6 +295,8 @@ export const usePresence = () => {
       // peer:offline = device disconnected with no remaining connections
       case "peer:offline": {
         const { fromCode } = msg as any;
+        // Only process events from paired devices
+        if (!linkedCodesRef.current.includes(fromCode)) break;
         setDevicePresences((prev) => {
           const existing = prev[fromCode];
           if (!existing) return prev;
@@ -267,6 +307,8 @@ export const usePresence = () => {
 
       case "presence:update": {
         const { fromCode, presence, ts } = msg as any;
+        // Drop presence updates from devices we haven't paired with
+        if (!linkedCodesRef.current.includes(fromCode)) break;
         setDevicePresences((prev) => {
           const existing = prev[fromCode] ?? { code: fromCode, name: fromCode, platform: "other", presence: null, online: false, lastSeen: "" };
           // presence=null is a heartbeat — device is online but not playing, keep online=true
@@ -278,6 +320,8 @@ export const usePresence = () => {
 
       case "sync:data": {
         const { fromCode, payload } = msg as any;
+        // Drop sync data from devices we haven't paired with
+        if (!linkedCodesRef.current.includes(fromCode)) break;
         log.debug("[presence] instant sync received", { from: fromCode });
         // Mark the sender as online since they just pushed data
         setDevicePresences((prev) => {
@@ -290,9 +334,12 @@ export const usePresence = () => {
         saveLastSyncAt(now);
         setSettings((prev: any) => ({ ...prev, lastSyncAt: now }));
         if (total > 0) {
+          const playlistMsg = (summary.newPlaylists + summary.updatedPlaylists) > 0
+            ? `+${summary.newPlaylists + summary.updatedPlaylists} playlists · `
+            : "";
           notifications.show({
             title: "Sync received",
-            message: `+${summary.newFavorites} favourites · +${summary.newPlaylists} playlists · +${summary.newHistory} history`,
+            message: `+${summary.newFavorites} favourites · ${playlistMsg}+${summary.newHistory} history`,
             color: "teal",
             autoClose: 4000,
           });
@@ -309,17 +356,70 @@ export const usePresence = () => {
         break;
       }
 
-      // ── Bidirectional pairing ──────────────────────────────────────────────
+      // A paired device deleted a video from a playlist — apply it locally
+      case "playlist:video:delete": {
+        const { fromCode, playlistSyncId, playlistTitle, videoId } = msg as any;
+        if (!linkedCodesRef.current.includes(fromCode)) break;
+        // Find playlist by syncId first, then title fallback for legacy playlists
+        const allPls = (getAllPlaylists() as any[]).filter(p => p.title !== "Favorites" && p.title !== "Cache");
+        const target = (playlistSyncId && allPls.find((p: any) => p.syncId === playlistSyncId))
+          || (playlistTitle && allPls.find((p: any) => p.title === playlistTitle));
+        if (!target) break;
+        const filtered = (target.videos ?? []).filter((v: any) => v.videoId !== videoId);
+        if (filtered.length === (target.videos ?? []).length) break; // video wasn't here, nothing to do
+        updatePlaylistVideos(target.title, filtered as CardVideo[]);
+        setters.current.setPlaylists(getPlaylists());
+        log.debug("[presence] video:delete applied", { playlist: target.title, videoId });
+        break;
+      }
+
+      // ── Bidirectional pairing — confirmation required ──────────────────────
       case "pair:request": {
         const { fromCode, senderName, senderPlatform } = msg as any;
+        const normalised = (fromCode as string).replace(/-/g, "");
+
+        // Use settingsRef to read the current linkedDevices — avoids the stale
+        // closure that would make this always read the mount-time empty array.
+        const currentLinked: LinkedDevice[] = settingsRef.current.linkedDevices ?? [];
+        const alreadyLinked = currentLinked.find(
+          (d: LinkedDevice) => d.code.replace(/-/g, "") === normalised
+        );
+
+        if (alreadyLinked) {
+          // Already paired — just acknowledge so the server confirms the pair
+          presenceService.sendPairAccept(fromCode, resolveDeviceName(settingsRef.current.deviceName, fromCode));
+          break;
+        }
+
+        // New device — show a confirmation toast the user must actively accept
+        const deviceLabel = resolveDeviceName(senderName, fromCode);
+        notifications.show({
+          id: `pair-req-${fromCode}`,
+          title: "Pairing request",
+          message: `"${deviceLabel}" wants to link with this device. Accept from Settings → Device Sync.`,
+          color: "blue",
+          autoClose: 30_000,
+        });
+        // Store pending request so SyncSettings can render Accept/Reject buttons
+        setSettings((prev: any) => ({
+          ...prev,
+          _pendingPairRequest: { fromCode, senderName: deviceLabel, senderPlatform: senderPlatform ?? "other" },
+        }));
+        break;
+      }
+
+      // Server confirmed both sides have accepted the pairing
+      case "pair:confirmed": {
+        const { fromCode, acceptorName } = msg as any;
         setSettings((prev: any) => {
           const existing: LinkedDevice[] = prev.linkedDevices ?? [];
-          const normalised = fromCode.replace(/-/g, "");
+          const normalised = (fromCode as string).replace(/-/g, "");
           if (existing.find((d: LinkedDevice) => d.code.replace(/-/g, "") === normalised)) return prev;
           const newDevice: LinkedDevice = {
             code: fromCode,
-            name: resolveDeviceName(senderName, fromCode),
-            platform: senderPlatform ?? "other",
+            // Use the acceptor's name if the server relayed it; fall back to generated name
+            name: resolveDeviceName(acceptorName || null, fromCode),
+            platform: "other",
             pairedAt: new Date().toISOString(),
             lastSyncAt: "",
           };
@@ -327,16 +427,36 @@ export const usePresence = () => {
           db.update("settings", { ID: 1 }, (row: any) => ({ ...row, linkedDevices: updated }));
           db.commit();
           notifications.show({
-            title: "Device linked!",
-            message: `"${newDevice.name}" linked automatically`,
+            title: "Device paired!",
+            message: `"${newDevice.name}" is now linked`,
             color: "teal",
             autoClose: 5000,
+          });
+          return { ...prev, linkedDevices: updated, _pendingPairRequest: undefined };
+        });
+        break;
+      }
+
+      // A paired device revoked — remove it from our linked list
+      case "pair:revoked": {
+        const { fromCode } = msg as any;
+        setSettings((prev: any) => {
+          const updated = (prev.linkedDevices ?? []).filter(
+            (d: LinkedDevice) => d.code !== fromCode
+          );
+          db.update("settings", { ID: 1 }, (row: any) => ({ ...row, linkedDevices: updated }));
+          db.commit();
+          notifications.show({
+            title: "Device unlinked",
+            message: "A paired device removed this connection",
+            color: "gray",
+            autoClose: 4000,
           });
           return { ...prev, linkedDevices: updated };
         });
         break;
       }
-    }
+    } // end switch (msg.type)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setSettings]);
 
@@ -414,6 +534,27 @@ export const usePresence = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsConnected, linkedCodes.join(",")]); 
 
+  // ── Auto-push when playlists change (e.g. song added/removed) ──────────────
+  // Debounced 1 s so bulk imports don't flood the server.
+  const playlistPushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!linkedCodesRef.current.length || !wsConnected) return;
+    if (playlistPushTimer.current) clearTimeout(playlistPushTimer.current);
+    playlistPushTimer.current = setTimeout(() => {
+      const payload = {
+        version: 2,
+        pushedAt: new Date().toISOString(),
+        playlists: getAllPlaylists(),
+        history: getVideosHistory().slice(0, 500),
+        followedArtists: getFollowedArtists(),
+      };
+      presenceService.pushSync(payload, linkedCodesRef.current);
+      log.debug("[presence] auto-push after playlist change");
+    }, 1000);
+    return () => { if (playlistPushTimer.current) clearTimeout(playlistPushTimer.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playlists, wsConnected]);
+
   // ── Instant push sync when data changes ───────────────────────────────────
   // This is called explicitly from SyncSettings when user triggers a sync.
   const pushInstantSync = useCallback(() => {
@@ -429,10 +570,23 @@ export const usePresence = () => {
     log.debug("[presence] instant sync pushed", { targets: linkedCodes.length });
   }, [linkedCodes.join(",")]);
 
+  /**
+   * Send a video deletion to all currently linked devices.
+   * Call once — iterates over all paired devices internally.
+   * The server queues delivery for any device that is currently offline.
+   */
+  const sendVideoDelete = useCallback((playlistSyncId: string, playlistTitle: string, videoId: string) => {
+    for (const code of linkedCodesRef.current) {
+      presenceService.sendVideoDelete(code, playlistSyncId, playlistTitle, videoId);
+    }
+    log.debug("[presence] video delete sent", { targets: linkedCodesRef.current.length, videoId });
+  }, []);
+
   return {
     myCode,
     wsConnected,
     devicePresences,
     pushInstantSync,
+    sendVideoDelete,
   };
 };

@@ -4,7 +4,6 @@ import {
   Box,
   Group,
   Image,
-  Loader,
   ScrollArea,
   Select,
   Skeleton,
@@ -12,7 +11,6 @@ import {
   Text,
   Title,
   Tooltip,
-  UnstyledButton,
 } from "@mantine/core";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { memo, useState } from "react";

@@ -44,12 +44,11 @@ import {
   IconLogout,
   IconRefresh,
   IconUser,
-  IconX,
 } from "@tabler/icons-react";
 import { memo, useCallback, useEffect, useState } from "react";
 
 import { db } from "../database";
-import { getPlaylists } from "../database/utils";
+import { getPlaylists, updatePlaylistVideos } from "../database/utils";
 import { usePlaylists, useSetPlaylists } from "../providers/Playlist";
 import { useSettings, useSetSettings } from "../providers/Settings";
 import { normalizeInstanceUri } from "../utils/invidiousInstance";
@@ -58,11 +57,14 @@ import {
   logoutInvidious,
   fetchInvidiousPlaylists,
   pushPlaylistToInvidious,
+  syncPlaylistToInvidious,
   type InvidiousCredentials,
   type InvidiousPlaylist,
 } from "../services/invidiousAuth";
 
 import type { Playlist } from "../types/interfaces/Playlist";
+import { getMappings, getMapping, setMapping, setMappings } from "../utils/invidiousMappings";
+import { acquirePushLock, releasePushLock } from "../services/invidiousAuth";
 import type { CardVideo } from "../types/interfaces/Card";
 
 // ─── Privacy options ──────────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ export const InvidiousAccountSettings = memo(() => {
   const persist = useCallback(
     (patch: Partial<typeof settings>) => {
       setSettings((prev) => ({ ...prev, ...patch }));
-      db.update("settings", { ID: 1 }, () => patch);
+      db.update("settings", { ID: 1 }, (row: any) => ({ ...row, ...patch }));
       db.commit();
     },
     [setSettings],
@@ -239,7 +241,13 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
   const [loadingInv,   setLoadingInv]   = useState(false);
 
   // Push state
-  const [privacy,       setPrivacy]       = useState<"private"|"unlisted"|"public">("private");
+  const [privacy,       setPrivacy]       = useState<"private"|"unlisted"|"public">(
+    () => {
+      // Try to load from settings first
+      const saved = settings.invidiousPlaylistPrivacy;
+      return (saved as "private"|"unlisted"|"public") || "private";
+    }
+  );
   const [pushingId,     setPushingId]     = useState<number | null>(null);
   const [pushedIds,     setPushedIds]     = useState<Set<number>>(new Set());
 
@@ -261,6 +269,43 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
     try {
       const data = await fetchInvidiousPlaylists(creds);
       setInvPlaylists(data);
+
+      // ── Auto-link by name matching ────────────────────────────────────────
+      // If a local playlist title exactly matches an Invidious playlist title
+      // (case-insensitive) and that local playlist isn't already mapped,
+      // auto-link them so future pushes sync rather than duplicate.
+      if (data.length > 0) {
+        const allLocal = getPlaylists() as any[];
+        const currentMappings = getMappings();
+        let linked = 0;
+
+        for (const local of allLocal) {
+          if (!local.ID) continue;
+          // Already has a mapping — skip
+          if (currentMappings[String(local.ID)] || local.playlistId) continue;
+
+          const localTitle = (local.title ?? "").trim().toLowerCase();
+          if (!localTitle || localTitle === "cache") continue;
+
+          const match = data.find(
+            (inv) => (inv.title ?? "").trim().toLowerCase() === localTitle,
+          );
+          if (match) {
+            currentMappings[String(local.ID)] = match.playlistId;
+            linked++;
+          }
+        }
+
+        if (linked > 0) {
+          setMappings(currentMappings);
+          notifications.show({
+            title: "Playlists linked",
+            message: `${linked} local playlist${linked !== 1 ? "s" : ""} matched by name and linked to Invidious.`,
+            color: "teal",
+            autoClose: 5000,
+          });
+        }
+      }
     } catch (e: any) {
       notifications.show({
         title: "Invidious",
@@ -272,14 +317,31 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
     }
   }, [creds.sid]);
 
-  // On mount: fetch playlists; if this is a fresh login (autoSync), push all local playlists afterwards
+  // On mount: fetch playlists; backfill any missing mappings; optionally auto-sync
   useEffect(() => {
     const init = async () => {
       await fetchPlaylists();
+
+      // ── Backfill: copy DB row playlistId → localStorage if missing ──
+      // Playlists pulled from Invidious have playlistId set in the DB row.
+      // We backfill localStorage so future pushes sync instead of re-creating.
+      // We do NOT sync the other direction (localStorage→DB row) because
+      // db.update({ ID }) silently matches ALL rows in localstoragedb.
+      const allLocal = getPlaylists() as any[];
+      const currentMappings = getMappings();
+      let backfilled = false;
+      for (const pl of allLocal) {
+        if (!pl.ID) continue;
+        if (pl.playlistId && !currentMappings[String(pl.ID)]) {
+          currentMappings[String(pl.ID)] = pl.playlistId;
+          backfilled = true;
+        }
+      }
+      if (backfilled) setMappings(currentMappings);
+
       if (autoSync) {
         onAutoSyncDone?.();
-        // localSyncable is derived below — use the ref to get current value
-        const syncable = (getPlaylists() as any[]).filter(
+        const syncable = allLocal.filter(
           (p: any) => p.ID && p.type !== "cache" && p.title !== "Cache",
         );
         if (syncable.length > 0) {
@@ -287,19 +349,34 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
           setBulkProgress(0);
           setBulkTotal(syncable.length);
           let done = 0;
+          const mappings = { ...getMappings() };
           for (const pl of syncable) {
             try {
-              await pushPlaylistToInvidious(creds, pl.title, pl.videos ?? [], "private");
+              // DB row is the primary source of truth for the linked Invidious ID
+              const existingInvId: string | undefined =
+                pl.playlistId || (pl.ID ? mappings[String(pl.ID)] : undefined) || undefined;
+              if (existingInvId) {
+                // Already mapped — sync only, never re-create
+                await syncPlaylistToInvidious(creds, existingInvId, pl.videos ?? []);
+              } else {
+                const invId = await pushPlaylistToInvidious(creds, pl.title, pl.videos ?? [], "private");
+                if (pl.ID && invId) {
+                  mappings[String(pl.ID)] = invId;
+                }
+              }
               if (pl.ID) setPushedIds(prev => new Set(prev).add(pl.ID!));
             } catch { /* skip */ }
             done++;
             setBulkProgress(done);
           }
+          setMappings(mappings);
+          db.commit();
+          setPlaylists(getPlaylists());
           await fetchPlaylists();
           setBulkPushing(false);
           notifications.show({
             title: "Auto-sync complete",
-            message: `${done} local playlist${done !== 1 ? "s" : ""} pushed to Invidious.`,
+            message: `${done} local playlist${done !== 1 ? "s" : ""} pushed/synced to Invidious.`,
             color: "teal",
             autoClose: 5000,
           });
@@ -326,28 +403,46 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
 
   const handlePush = async (pl: Playlist) => {
     if (!pl.ID) return;
+    // Guard against concurrent pushes:
+    // 1. React state guard (same component instance)
+    if (pushingId !== null || bulkPushing) return;
+    // 2. Module-level mutex guard (across component instances, e.g. StrictMode double-mount)
+    if (!acquirePushLock()) return;
     setPushingId(pl.ID);
     try {
       const videos = pl.videos as CardVideo[];
-      const newId = await pushPlaylistToInvidious(creds, pl.title, videos, privacy);
-      setPushedIds(prev => new Set(prev).add(pl.ID!));
-      // Store mapping so future edits to this local playlist sync to Invidious
-      if (pl.ID && newId) {
-        persist({
-          invidiousPlaylistMappings: {
-            ...settings.invidiousPlaylistMappings,
-            [pl.ID]: newId,
-          },
-        });
+
+      // localStorage is the sole reliable store for push-created mappings.
+      const existingInvId: string | undefined = getMapping(pl.ID) || undefined;
+
+      let invId: string;
+      let isSync = false;
+
+      if (existingInvId) {
+        // Already pushed before — only sync (add missing videos), never re-create
+        await syncPlaylistToInvidious(creds, existingInvId, videos);
+        invId = existingInvId;
+        isSync = true;
+      } else {
+        // First push — create new playlist on Invidious
+        invId = await pushPlaylistToInvidious(creds, pl.title, videos, privacy);
+        // localStorage is the reliable store for push mappings.
+        // NEVER use db.update({ ID }) - localstoragedb doesn't support ID as a query field,
+        // it silently matches ALL rows and corrupts every playlist's playlistId.
+        setMapping(pl.ID, invId);
+        // Refresh React context so the button immediately switches to "Sync".
+        setPlaylists(getPlaylists());
       }
+
+      setPushedIds(prev => new Set(prev).add(pl.ID!));
       await fetchPlaylists();
       notifications.show({
-        title: "Pushed to Invidious",
+        title: isSync ? "Synced to Invidious" : "Pushed to Invidious",
         message: (
           <span>
             "{pl.title}" →{" "}
             <Anchor
-              href={`${invBase}/playlist?list=${newId}`}
+              href={`${invBase}/playlist?list=${invId}`}
               target="_blank"
               size="xs"
               style={{ color: "#2ab5a5" }}
@@ -366,6 +461,7 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
         color: "red",
       });
     } finally {
+      releasePushLock();
       setPushingId(null);
     }
   };
@@ -375,25 +471,46 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
   const handlePushAll = async () => {
     const syncable = localSyncable;
     if (!syncable.length) return;
+    if (!acquirePushLock()) return;
     setBulkPushing(true);
     setBulkProgress(0);
     setBulkTotal(syncable.length);
 
     let done = 0;
+    const newMappings = { ...getMappings() };
+
     for (const pl of syncable) {
       try {
-        await pushPlaylistToInvidious(creds, pl.title, pl.videos as CardVideo[], privacy);
+        const existingInvId: string | undefined = pl.ID ? newMappings[String(pl.ID)] : undefined;
+
+        if (existingInvId) {
+          // Already mapped — sync only (add missing videos), never re-create
+          await syncPlaylistToInvidious(creds, existingInvId, pl.videos as CardVideo[]);
+        } else {
+          // First time — create and persist to both DB row and localStorage
+          const invId = await pushPlaylistToInvidious(creds, pl.title, pl.videos as CardVideo[], privacy);
+          if (pl.ID && invId) {
+            newMappings[String(pl.ID)] = invId;
+          }
+        }
         if (pl.ID) setPushedIds(prev => new Set(prev).add(pl.ID!));
       } catch { /* skip individual failures */ }
       done++;
       setBulkProgress(done);
     }
 
+    // Persist all new mappings and DB changes atomically
+    setMappings(newMappings);
+    db.commit();
+    // Refresh React context so all buttons switch to "Sync"
+    setPlaylists(getPlaylists());
+
     await fetchPlaylists();
+    releasePushLock();
     setBulkPushing(false);
     notifications.show({
       title: "Bulk push complete",
-      message: `${done} playlists pushed to Invidious.`,
+      message: `${done} playlists pushed/synced to Invidious.`,
       color: "teal",
     });
   };
@@ -414,14 +531,56 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
         lengthSeconds: v.lengthSeconds ?? 0,
       }));
 
+      const allLocal = db.queryAll("playlists") as any[];
+
+      // 1. Check by playlistId (the Invidious playlist ID already stored in DB rows)
+      const existing = allLocal.find(
+        (p) => p.playlistId && p.playlistId === pl.playlistId
+      );
+      if (existing) {
+        const localIds = new Set((existing.videos ?? []).map((v: any) => v.videoId));
+        const newVids = videos.filter((v) => !localIds.has(v.videoId));
+        if (newVids.length) {
+          updatePlaylistVideos(existing.title, [...(existing.videos ?? []), ...newVids] as CardVideo[]);
+        }
+        setPlaylists(getPlaylists());
+        setImportedIds(prev => new Set(prev).add(pl.playlistId));
+        notifications.show({
+          title: newVids.length ? "Playlist updated" : "Already up to date",
+          message: newVids.length
+            ? `"${existing.title}" +${newVids.length} new videos`
+            : `"${existing.title}" has no new videos`,
+          color: "teal",
+          autoClose: 5000,
+        });
+        return;
+      }
+
+      // 2. New playlist — insert with playlistId + syncId
       db.insert("playlists", {
         createdAt: new Date().toISOString(),
         title: pl.title,
+        playlistId: pl.playlistId,
         videos,
         videoCount: videos.length,
         type: "playlist",
+        syncId: crypto.randomUUID(),
       });
       db.commit();
+
+      // Retrieve the newly inserted row to get its auto-assigned local ID,
+      // then save the mapping so future pushes sync back to the same Invidious playlist
+      // instead of creating a new one every time.
+      const inserted = db.queryAll("playlists", {
+        query: { title: pl.title },
+        sort: [["ID", "DESC"]],
+        limit: 1,
+      })[0];
+
+      if (inserted?.ID) {
+        setMapping(inserted.ID, pl.playlistId);
+      }
+
       setPlaylists(getPlaylists());
       setImportedIds(prev => new Set(prev).add(pl.playlistId));
 
@@ -510,7 +669,12 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
             <Select
               size="xs"
               value={privacy}
-              onChange={v => setPrivacy((v ?? "private") as any)}
+              onChange={v => {
+                const newPrivacy = (v ?? "private") as "private"|"unlisted"|"public";
+                setPrivacy(newPrivacy);
+                // Persist to database
+                persist({ invidiousPlaylistPrivacy: newPrivacy });
+              }}
               data={PRIVACY_OPTIONS}
               style={{ width: 110 }}
               styles={{ input: { fontSize: 11 } }}
@@ -521,7 +685,7 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
               variant="light"
               leftSection={<IconArrowUp size={13} />}
               loading={bulkPushing}
-              disabled={!localSyncable.length}
+              disabled={!localSyncable.length || bulkPushing || pushingId !== null}
               onClick={handlePushAll}
             >
               Push All
@@ -570,22 +734,30 @@ const LoggedInPanel = memo(({ creds, persist, autoSync, onAutoSyncDone }: Logged
                     >
                       {pl.title}
                     </Text>
-                    <Text size="xs" c="dimmed">{pl.videoCount} videos</Text>
+                    <Group gap={4}>
+                      <Text size="xs" c="dimmed">{pl.videoCount} videos</Text>
+                      {pl.ID && getMapping(pl.ID) && !wasPushed && (
+                        <Badge size="xs" color="teal" variant="dot">linked</Badge>
+                      )}
+                    </Group>
                   </Box>
                   <Button
                     size="xs"
                     variant={wasPushed ? "filled" : "subtle"}
                     color="teal"
                     loading={isPushing}
-                    disabled={isPushing}
+                    disabled={isPushing || bulkPushing || pushingId !== null}
                     leftSection={
                       isPushing ? undefined :
                       wasPushed ? <IconCheck size={12} /> :
-                      <IconArrowUp size={12} />
+                      (pl.ID && getMapping(pl.ID))
+                        ? <IconRefresh size={12} />
+                        : <IconArrowUp size={12} />
                     }
                     onClick={() => handlePush(pl)}
                   >
-                    {wasPushed ? "Pushed" : "Push"}
+                    {wasPushed ? "Synced" :
+                     (pl.ID && getMapping(pl.ID)) ? "Sync" : "Push"}
                   </Button>
                 </Flex>
               );

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../database";
 import { getPlaylists } from "../database/utils";
+import { setMapping } from "../utils/invidiousMappings";
 import { useSetPlaylists } from "../providers/Playlist";
 import { useSettings, useSetSettings } from "../providers/Settings";
 import { createInvidiousPlaylist } from "../services/invidiousAuth";
@@ -54,10 +55,7 @@ export const ModalCreatePlaylist = memo(() => {
           };
           const invId = await createInvidiousPlaylist(creds, playlistTitle, "private");
           if (invId) {
-            const updatedMappings = { ...settings.invidiousPlaylistMappings, [newPl.ID]: invId };
-            setSettings((prev: any) => ({ ...prev, invidiousPlaylistMappings: updatedMappings }));
-            db.update("settings", { ID: 1 }, () => ({ invidiousPlaylistMappings: updatedMappings }));
-            db.commit();
+            setMapping(newPl.ID, invId);
             notifications.show({
               title: "Invidious",
               message: `"${playlistTitle}" created on Invidious and linked for auto-sync.`,

@@ -2,14 +2,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 16px 24px;
+  gap: 14px;
+  padding: 14px 28px;
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(18,18,18,0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  background: rgba(10, 18, 20, 0.88);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(42, 181, 165, 0.08);
   transition: background 0.3s ease;
 }

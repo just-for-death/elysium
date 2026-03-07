@@ -10,6 +10,8 @@ export interface CardVideo {
   liveNow: boolean;
   lengthSeconds: number;
   videoThumbnails?: Thumbnail[];
+  /** MusicBrainz recording MBID — preserved when importing from ListenBrainz to avoid re-lookup on push */
+  recordingMbid?: string;
 }
 
 export interface CardChannel {

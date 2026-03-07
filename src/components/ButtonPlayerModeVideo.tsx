@@ -3,7 +3,7 @@ import { IconVideo } from "@tabler/icons-react";
 import { type FC, memo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { usePlayerAudio } from "../providers/Player";
+import { useAudioElement } from "../providers/Player";
 import { usePlayerMode, useSetPlayerMode } from "../providers/PlayerMode";
 
 interface ButtonPlayerModeVideoProps {
@@ -15,14 +15,13 @@ export const ButtonPlayerModeVideo: FC<ButtonPlayerModeVideoProps> = memo(
   ({ iconSize, render = "button" }) => {
     const setPlayerMode = useSetPlayerMode();
     const playerMode = usePlayerMode();
-    const playerAudio = usePlayerAudio();
+    const getAudioEl = useAudioElement();
     const { t } = useTranslation();
 
     const handleClick = () => {
       setPlayerMode("video");
-
-      // @ts-ignore
-      const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
+      const audio = getAudioEl();
+      if (!audio) return;
       audio.pause();
     };
 

@@ -64,4 +64,11 @@ export default (() => {
       saveMigration("01032026_migrate_device_musical_names");
     } catch {}
   }
+
+  if (!migrationsName.includes("07032026_migrate_playlist_sync_ids")) {
+    try {
+      require("./07032026_migrate_playlist_sync_ids").default();
+      saveMigration("07032026_migrate_playlist_sync_ids");
+    } catch {}
+  }
 })();

@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../database";
 import { getPlaylists } from "../database/utils";
+import { getMapping } from "../utils/invidiousMappings";
 import { usePlaylists, useSetPlaylists } from "../providers/Playlist";
 import { useSettings } from "../providers/Settings";
 import { addVideoToInvidiousPlaylist, type InvidiousCredentials } from "../services/invidiousAuth";
@@ -66,7 +67,7 @@ export const ModalAddToPlaylist: FC<ModalAddToPlaylistProps> = memo(
         const targetTitle = selectedPlaylistTitle || newPlaylistTitle;
         const targetPlaylist = getPlaylists().find(p => p.title === targetTitle);
         if (targetPlaylist?.ID) {
-          const invId = settings.invidiousPlaylistMappings?.[targetPlaylist.ID];
+          const invId = getMapping(targetPlaylist.ID);
           if (invId) {
             addVideoToInvidiousPlaylist(creds, invId, video.videoId).catch(() => {
               // Silent fail — local change already persisted

@@ -10,7 +10,7 @@ import { getSearchHistory } from "../database/utils";
 import { useSearchValues, useSetSearchValues } from "../providers/Search";
 import { Form } from "./Form";
 import classes from "./SearchBar.module.css";
-import { SearcHistoryMenu } from "./SearchHistoryMenu";
+import { SearchHistoryMenu } from "./SearchHistoryMenu";
 
 export const SearchBar = memo(() => {
   const setSearchValues = useSetSearchValues();
@@ -66,7 +66,7 @@ export const SearchBar = memo(() => {
         className={classes.form}
         onSubmit={form.onSubmit((values) => handleSubmit(values))}
       >
-        <SearcHistoryMenu opened={menuOpened} onSelect={handleSelect}>
+        <SearchHistoryMenu opened={menuOpened} onSelect={handleSelect}>
           <div
             onFocusCapture={() => setMenuOpened(true)}
             onBlurCapture={() => setMenuOpened(false)}
@@ -89,7 +89,7 @@ export const SearchBar = memo(() => {
               }
             />
           </div>
-        </SearcHistoryMenu>
+        </SearchHistoryMenu>
         <button type="submit" style={{ display: "none" }} />
       </Form>
     </Flex>

@@ -23,19 +23,31 @@ import {
 } from "../services/listenbrainz-charts";
 import { HorizontalGridList } from "./HorizontalGridList";
 
-// ── Colour-coded badge per playlist type ─────────────────────────────────────
+// ── Colour-coded badge per playlist type ──────────────────────────────────────
+
 function playlistMeta(title: string): { badge: string; color: string } {
   const t = title.toLowerCase();
-  if (t.includes("weekly jams"))  return { badge: "Weekly Jams",      color: "blue"   };
-  if (t.includes("exploration"))  return { badge: "Exploration",      color: "teal"   };
-  if (t.includes("top missed"))   return { badge: "Top Missed",       color: "orange" };
-  if (t.includes("last week"))    return { badge: "Last Week's Jams", color: "grape"  };
-  if (t.includes("discoveries"))  return { badge: "Discoveries",      color: "green"  };
-  if (t.includes("similar"))      return { badge: "Similar Artists",  color: "cyan"   };
-  return                                 { badge: "Playlist",         color: "gray"   };
+  if (t.includes("weekly jams"))  return { badge: "Weekly Jams",       color: "blue"   };
+  if (t.includes("exploration"))  return { badge: "Exploration",       color: "teal"   };
+  if (t.includes("top missed"))   return { badge: "Top Missed",        color: "orange" };
+  if (t.includes("last week"))    return { badge: "Last Week's Jams",  color: "grape"  };
+  if (t.includes("discoveries"))  return { badge: "Discoveries",       color: "green"  };
+  if (t.includes("similar"))      return { badge: "Similar Artists",   color: "cyan"   };
+  return                                 { badge: "Playlist",          color: "gray"   };
 }
 
-// ── One playlist row — fetches full tracks then resolves to videos ────────────
+// ── One playlist row ──────────────────────────────────────────────────────────
+//
+// Two-step query:
+//  1. getLBPlaylistWithTracks — fetches the full playlist (tracks are empty in the
+//     listing stub from the /createdfor endpoint).
+//  2. resolvePlaylistTracks   — converts track metadata to CardVideos via iTunes
+//     artwork lookup + Apple Music virtual IDs. This used to call Invidious search
+//     (~10 s); it now takes ~300–500 ms (all iTunes lookups run in parallel).
+//
+// Because react-query runs both queries independently, the first playlist to
+// finish loading appears in the UI before the others — progressively streamed.
+
 const PlaylistRow = memo(({
   stub,
   token,
@@ -47,13 +59,12 @@ const PlaylistRow = memo(({
 }) => {
   const { badge, color } = playlistMeta(stub.title);
 
-  // Pull UUID from identifier URI: https://listenbrainz.org/playlist/<uuid>
   const uuid = stub.identifier.split("/").filter(Boolean).pop() ?? "";
   const lbUrl = uuid
     ? `https://listenbrainz.org/playlist/${uuid}/`
     : `https://listenbrainz.org/user/${encodeURIComponent(username)}/recommendations/`;
 
-  // Step 1: fetch the full playlist (with tracks) — the listing endpoint returns 0 tracks
+  // Step 1: fetch full playlist (with tracks)
   const fullPlaylistQuery = useQuery(
     ["lb-playlist-full", uuid],
     () => getLBPlaylistWithTracks(uuid, token),
@@ -65,9 +76,9 @@ const PlaylistRow = memo(({
   );
 
   const fullPlaylist = fullPlaylistQuery.data;
-  const trackCount   = fullPlaylist?.track?.length ?? 0;
+  const trackCount = fullPlaylist?.track?.length ?? 0;
 
-  // Step 2: resolve tracks → CardVideos via Invidious (only when we have tracks)
+  // Step 2: resolve tracks → CardVideos (fast: iTunes artwork + virtual IDs)
   const videosQuery = useQuery(
     ["lb-playlist-videos", uuid],
     () => resolvePlaylistTracks(fullPlaylist!.track, 20),
@@ -80,12 +91,14 @@ const PlaylistRow = memo(({
 
   const date = (fullPlaylist?.date ?? stub.date)
     ? new Date(fullPlaylist?.date ?? stub.date).toLocaleDateString(undefined, {
-        month: "short", day: "numeric", year: "numeric",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
       })
     : null;
 
   const annotation = fullPlaylist?.annotation ?? stub.annotation;
-  const isLoading  = fullPlaylistQuery.isLoading || videosQuery.isLoading;
+  const isLoading = fullPlaylistQuery.isLoading || videosQuery.isLoading;
 
   return (
     <Box mb={48}>
@@ -99,7 +112,9 @@ const PlaylistRow = memo(({
         </Badge>
         {date && <Text size="xs" c="dimmed">{date}</Text>}
         {!fullPlaylistQuery.isLoading && (
-          <Text size="xs" c="dimmed">· {trackCount} track{trackCount !== 1 ? "s" : ""}</Text>
+          <Text size="xs" c="dimmed">
+            · {trackCount} track{trackCount !== 1 ? "s" : ""}
+          </Text>
         )}
         <Tooltip label="View on ListenBrainz" position="top" withArrow>
           <Anchor
@@ -116,7 +131,11 @@ const PlaylistRow = memo(({
 
       {/* Description */}
       {annotation && (
-        <Text size="xs" c="dimmed" mb={8} lineClamp={2}
+        <Text
+          size="xs"
+          c="dimmed"
+          mb={8}
+          lineClamp={2}
           dangerouslySetInnerHTML={{ __html: annotation }}
         />
       )}
@@ -125,7 +144,13 @@ const PlaylistRow = memo(({
       {isLoading && (
         <Flex gap={12} style={{ overflow: "hidden" }}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} height={160} width={140} radius="md" style={{ flexShrink: 0 }} />
+            <Skeleton
+              key={i}
+              height={160}
+              width={140}
+              radius="md"
+              style={{ flexShrink: 0 }}
+            />
           ))}
         </Flex>
       )}
@@ -135,9 +160,12 @@ const PlaylistRow = memo(({
         <HorizontalGridList data={videosQuery.data} label={stub.title} />
       )}
 
-      {/* Tracks exist but Invidious couldn't resolve any */}
+      {/* Tracks exist but couldn't resolve any */}
       {!isLoading && trackCount > 0 && !videosQuery.data?.length && (
-        <Flex align="center" gap={8} p="sm"
+        <Flex
+          align="center"
+          gap={8}
+          p="sm"
           style={(theme) => ({
             borderRadius: theme.radius.md,
             border: `1px dashed light-dark(${theme.colors.gray[3]}, ${theme.colors.dark[4]})`,
@@ -145,7 +173,7 @@ const PlaylistRow = memo(({
         >
           <IconMusic size={15} opacity={0.4} />
           <Text size="sm" c="dimmed">
-            Couldn't resolve tracks via Invidious.{" "}
+            Couldn't resolve tracks.{" "}
             <Anchor href={lbUrl} target="_blank" rel="noopener noreferrer" size="sm">
               Listen on ListenBrainz ↗
             </Anchor>
@@ -153,9 +181,12 @@ const PlaylistRow = memo(({
         </Flex>
       )}
 
-      {/* Playlist is genuinely empty (no tracks generated yet) */}
+      {/* Playlist generated but genuinely empty */}
       {!isLoading && trackCount === 0 && !fullPlaylistQuery.isError && (
-        <Flex align="center" gap={8} p="sm"
+        <Flex
+          align="center"
+          gap={8}
+          p="sm"
           style={(theme) => ({
             borderRadius: theme.radius.md,
             border: `1px dashed light-dark(${theme.colors.gray[3]}, ${theme.colors.dark[4]})`,
@@ -175,11 +206,12 @@ const PlaylistRow = memo(({
 });
 
 // ── Main section ──────────────────────────────────────────────────────────────
+
 export const ListenBrainzRecommendations = memo(() => {
   const settings = useSettings();
-  const username  = settings.listenBrainzUsername;
-  const token     = settings.listenBrainzToken;
-  const enabled   = !!username && !!token && (settings.listenBrainzEnabled ?? false);
+  const username = settings.listenBrainzUsername;
+  const token    = settings.listenBrainzToken;
+  const enabled  = !!username && !!token && (settings.listenBrainzEnabled ?? false);
 
   const playlistsQuery = useQuery(
     ["lb-created-for-you", username],
@@ -226,7 +258,7 @@ export const ListenBrainzRecommendations = memo(() => {
         {" "}— Weekly Jams, Exploration, Top Missed Recordings and more.
       </Text>
 
-      {/* Loading skeletons while the list loads */}
+      {/* Skeleton while the playlist list loads */}
       {playlistsQuery.isLoading && (
         <Stack gap="xl">
           {[0, 1, 2].map((i) => (
@@ -234,7 +266,13 @@ export const ListenBrainzRecommendations = memo(() => {
               <Skeleton height={22} width={260} mb={10} />
               <Flex gap={12}>
                 {Array.from({ length: 6 }).map((_, j) => (
-                  <Skeleton key={j} height={160} width={140} radius="md" style={{ flexShrink: 0 }} />
+                  <Skeleton
+                    key={j}
+                    height={160}
+                    width={140}
+                    radius="md"
+                    style={{ flexShrink: 0 }}
+                  />
                 ))}
               </Flex>
             </Box>
@@ -242,9 +280,12 @@ export const ListenBrainzRecommendations = memo(() => {
         </Stack>
       )}
 
-      {/* API error fetching the list */}
+      {/* API error */}
       {playlistsQuery.isError && (
-        <Flex align="center" gap={8} p="md"
+        <Flex
+          align="center"
+          gap={8}
+          p="md"
           style={(theme) => ({
             borderRadius: theme.radius.md,
             border: `1px solid light-dark(${theme.colors.red[3]}, ${theme.colors.red[9]})`,
@@ -260,10 +301,14 @@ export const ListenBrainzRecommendations = memo(() => {
         </Flex>
       )}
 
-      {/* No playlists returned */}
-      {!playlistsQuery.isLoading && !playlistsQuery.isError &&
+      {/* No playlists yet */}
+      {!playlistsQuery.isLoading &&
+        !playlistsQuery.isError &&
         playlistsQuery.data?.length === 0 && (
-        <Flex align="center" gap={8} p="md"
+        <Flex
+          align="center"
+          gap={8}
+          p="md"
           style={(theme) => ({
             borderRadius: theme.radius.md,
             border: `1px dashed light-dark(${theme.colors.gray[3]}, ${theme.colors.dark[4]})`,
@@ -279,7 +324,7 @@ export const ListenBrainzRecommendations = memo(() => {
         </Flex>
       )}
 
-      {/* One row per playlist stub — each row fetches its own full content */}
+      {/* One row per playlist — each loads independently (progressive rendering) */}
       {playlistsQuery.data?.map((stub) => (
         <PlaylistRow
           key={stub.identifier}

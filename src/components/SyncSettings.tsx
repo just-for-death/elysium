@@ -20,7 +20,6 @@ import {
   Flex,
   Group,
   Paper,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -61,8 +60,7 @@ import { pushSync, pullSync } from "../services/sync";
 import type { FavoritePlaylist, Playlist } from "../types/interfaces/Playlist";
 import type { LinkedDevice }    from "../types/interfaces/Settings";
 import type { DevicePresence }  from "../hooks/usePresence";
-import { deriveDeviceCode }     from "../hooks/usePresence";
-import { getMusicalDeviceName, resolveDeviceName } from "../utils/deviceName";
+import { resolveDeviceName } from "../utils/deviceName";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -102,8 +100,6 @@ export const SyncSettings = memo(() => {
 
   // ── Pairing form ──────────────────────────────────────────────────────────
   const [pairCode,     setPairCode]     = useState("");
-  const [pairName,     setPairName]     = useState("");
-  const [pairPlatform, setPairPlatform] = useState<string>("other");
   const [pairing,      setPairing]      = useState(false);
 
   // ── Manual sync (legacy fallback) ─────────────────────────────────────────
@@ -141,22 +137,55 @@ export const SyncSettings = memo(() => {
     }
     setPairing(true);
     const formatted = code.length >= 8 ? `${code.slice(0, 4)}-${code.slice(4, 8)}` : code;
-    const newDevice: LinkedDevice = {
-      code: formatted, name: pairName.trim() || getMusicalDeviceName(formatted),
-      platform: pairPlatform, pairedAt: new Date().toISOString(), lastSyncAt: "",
-    };
-    saveLinkedDevices([...linkedDevices, newDevice]);
-    // Notify the other device so it auto-adds us back (bidirectional pairing)
+    // Send pairing request — do NOT save locally yet.
+    // We wait for pair:confirmed from the server (after the other device accepts).
     presenceService.sendPairRequest(formatted, resolveDeviceName(settings.deviceName, myCode), "other");
-    setPairCode(""); setPairName(""); setPairPlatform("other");
+    setPairCode("");
     setPairing(false);
-    notifications.show({ title: "Device linked!", message: `"${newDevice.name}" is now connected — they'll be notified`, color: "green", icon: <IconCheck size={16} /> });
-  }, [pairCode, pairName, pairPlatform, linkedDevices, myCode, saveLinkedDevices, settings.deviceName]);
+    notifications.show({
+      title: "Pairing request sent",
+      message: "Waiting for the other device to accept…",
+      color: "blue",
+      autoClose: 30_000,
+    });
+  }, [pairCode, linkedDevices, myCode, settings.deviceName]);
 
   const handleUnlink = useCallback((code: string) => {
     saveLinkedDevices(linkedDevices.filter((d) => d.code !== code));
+    // Notify the other device so it removes us from its linked list too
+    presenceService.sendPairRevoke(code);
     notifications.show({ title: "Device unlinked", message: "Removed from sync list", color: "gray" });
   }, [linkedDevices, saveLinkedDevices]);
+
+  // ── Accept / reject a pending pair request ────────────────────────────────
+  const pendingRequest = (settings as any)._pendingPairRequest as
+    { fromCode: string; senderName: string; senderPlatform: string } | undefined;
+
+  const handleAcceptPair = useCallback(() => {
+    if (!pendingRequest) return;
+    const { fromCode, senderName, senderPlatform } = pendingRequest;
+    // Save device locally
+    const newDevice: LinkedDevice = {
+      code: fromCode,
+      name: senderName,
+      platform: senderPlatform,
+      pairedAt: new Date().toISOString(),
+      lastSyncAt: "",
+    };
+    saveLinkedDevices([...linkedDevices, newDevice]);
+    // Tell the server to confirm the pair (notifies the requester too)
+    presenceService.sendPairAccept(fromCode, resolveDeviceName(settings.deviceName, myCode));
+    setSettings((prev: any) => ({ ...prev, _pendingPairRequest: undefined }));
+    notifications.hide(`pair-req-${fromCode}`);
+    notifications.show({ title: "Device paired!", message: `"${senderName}" is now linked`, color: "teal" });
+  }, [pendingRequest, linkedDevices, saveLinkedDevices, setSettings]);
+
+  const handleRejectPair = useCallback(() => {
+    if (!pendingRequest) return;
+    presenceService.sendPairRevoke(pendingRequest.fromCode);
+    setSettings((prev: any) => ({ ...prev, _pendingPairRequest: undefined }));
+    notifications.hide(`pair-req-${pendingRequest.fromCode}`);
+  }, [pendingRequest, setSettings]);
 
   // ── Instant sync ──────────────────────────────────────────────────────────
   const handleInstantSync = useCallback(() => {
@@ -208,7 +237,24 @@ export const SyncSettings = memo(() => {
 
   return (
     <Box>
-      {/* ── Status bar ── */}
+      {/* ── Pending pair request banner ── */}
+        {pendingRequest && (
+          <Alert color="blue" variant="light" title="Pairing request">
+            <Text size="sm" mb="xs">
+              <strong>"{pendingRequest.senderName}"</strong> wants to link with this device.
+            </Text>
+            <Group gap="xs">
+              <Button size="xs" color="teal" leftSection={<IconCheck size={13} />} onClick={handleAcceptPair}>
+                Accept
+              </Button>
+              <Button size="xs" color="red" variant="subtle" leftSection={<IconX size={13} />} onClick={handleRejectPair}>
+                Reject
+              </Button>
+            </Group>
+          </Alert>
+        )}
+
+        {/* ── Status bar ── */}
       <Group mb="md" align="center">
         <Text fw={500}>Device Sync</Text>
         <Badge color={wsConnected ? "teal" : "gray"} size="sm" variant="dot">
@@ -368,19 +414,6 @@ export const SyncSettings = memo(() => {
                 }}
                 style={{ maxWidth: 200 }}
               />
-              <Group gap="sm">
-                <TextInput label="Device name" placeholder="e.g. My iPad"
-                  value={pairName} onChange={(e) => setPairName(e.currentTarget.value)} style={{ maxWidth: 200 }} />
-                <Select
-                  label="Platform"
-                  data={[
-                    { value: "linux", label: "Linux" }, { value: "android", label: "Android" },
-                    { value: "ipad", label: "iPad" }, { value: "windows", label: "Windows" },
-                    { value: "mac", label: "Mac" }, { value: "other", label: "Other" },
-                  ]}
-                  value={pairPlatform} onChange={(v) => setPairPlatform(v ?? "other")} style={{ width: 140 }}
-                />
-              </Group>
               <Button leftSection={<IconLink size={16} />} loading={pairing} onClick={handlePair} size="sm">
                 Link device
               </Button>

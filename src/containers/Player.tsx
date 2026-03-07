@@ -1,7 +1,8 @@
-import { Box, useMantineTheme } from "@mantine/core";
+import { useMantineTheme } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { memo } from "react";
 
+import { FullscreenPlayer } from "../components/FullscreenPlayer";
 import { MobilePlayer } from "../components/MobilePlayer";
 import { Player } from "../components/Player";
 import { PlayerAudio } from "../components/PlayerAudio";
@@ -12,7 +13,9 @@ import { VideoPlayerContainer } from "./VideoPlayer";
 
 export const PlayerContainer = memo(() => {
   const theme = useMantineTheme();
-  const matches = useMediaQuery(`(max-width: ${theme.breakpoints.md})`);
+  const isMobile = useMediaQuery(`(max-width: ${theme.breakpoints.md})`, true, {
+    getInitialValueInEffect: false,
+  });
   const playerUrl = usePlayerUrl();
   const playerMode = usePlayerMode();
   const settings = useSettings();
@@ -20,12 +23,16 @@ export const PlayerContainer = memo(() => {
   if (!playerUrl) return null;
 
   return (
-    <Box style={{ zIndex: 4 }}>
+    <>
       <PlayerAudio />
+      {/* FullscreenPlayer must always be mounted — on mobile it is NOT inside
+          <Player />, so without this the overlay never renders and setFullscreen
+          does nothing on Android / mobile browsers. */}
+      {isMobile && <FullscreenPlayer />}
       {settings.videoMode && playerMode === "video" ? (
         <VideoPlayerContainer />
       ) : null}
-      {matches ? <MobilePlayer /> : <Player />}
-    </Box>
+      {isMobile ? <MobilePlayer /> : <Player />}
+    </>
   );
 });

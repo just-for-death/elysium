@@ -39,7 +39,10 @@ export type SyncMessage =
   | { type: "peer:online";     fromCode: string; presence?: PresenceState | null; ts: string }
   | { type: "peer:offline";    fromCode: string; ts: string }
   | { type: "pair:request";    fromCode: string; senderName: string; senderPlatform: string; ts: string }
-  | { type: "pair:ack";        targetCode: string; delivered: number; ts: string };
+  | { type: "pair:ack";        targetCode: string; delivered: number; ts: string }
+  | { type: "pair:confirmed";  fromCode: string; acceptorName?: string | null; ts: string }
+  | { type: "pair:revoked";    fromCode: string; ts: string }
+  | { type: "playlist:video:delete"; fromCode: string; playlistSyncId: string; playlistTitle: string; videoId: string; ts: string };
 
 type MessageHandler = (msg: SyncMessage) => void;
 
@@ -216,6 +219,34 @@ class PresenceService {
   sendPairRequest(targetCode: string, senderName: string, senderPlatform: string) {
     this.send({ type: "pair:request", targetCode, senderName, senderPlatform });
     log.debug("[presence] pair:request", { target: targetCode });
+  }
+
+  /**
+   * Accept a pairing request from targetCode.
+   * Server adds both devices to confirmedPairs and notifies both sides.
+   * acceptorName is relayed to the requester so they see a real device name.
+   */
+  sendPairAccept(targetCode: string, acceptorName?: string) {
+    this.send({ type: "pair:accept", targetCode, acceptorName: acceptorName ?? null });
+    log.debug("[presence] pair:accept", { target: targetCode });
+  }
+
+  /**
+   * Revoke pairing with targetCode.
+   * Server removes both devices from confirmedPairs and notifies the other side.
+   */
+  sendPairRevoke(targetCode: string) {
+    this.send({ type: "pair:revoke", targetCode });
+    log.debug("[presence] pair:revoke", { target: targetCode });
+  }
+
+  /**
+   * Send a video deletion event to a specific paired device.
+   * If the target is offline the server will queue it for delivery on reconnect.
+   */
+  sendVideoDelete(targetCode: string, playlistSyncId: string, playlistTitle: string, videoId: string) {
+    this.send({ type: "playlist:video:delete", targetCode, playlistSyncId, playlistTitle, videoId });
+    log.debug("[presence] video:delete", { target: targetCode, videoId });
   }
 }
 

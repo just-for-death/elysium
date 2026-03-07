@@ -16,7 +16,6 @@ import {
   Group,
   Paper,
   ScrollArea,
-  Select,
   Stack,
   Text,
   TextInput,
@@ -56,7 +55,7 @@ import { pushSync, pullSync }    from "../services/sync";
 import type { FavoritePlaylist, Playlist } from "../types/interfaces/Playlist";
 import type { LinkedDevice }     from "../types/interfaces/Settings";
 import type { DevicePresence }   from "../hooks/usePresence";
-import { getMusicalDeviceName, resolveDeviceName }  from "../utils/deviceName";
+import { resolveDeviceName }  from "../utils/deviceName";
 
 // ─── Platform icon ─────────────────────────────────────────────────────────────
 
@@ -189,8 +188,6 @@ export const DevicesPage = memo(() => {
   const linkedDevices: LinkedDevice[] = useMemo(() => settings.linkedDevices ?? [], [settings.linkedDevices]);
 
   const [pairCode,     setPairCode]     = useState("");
-  const [pairName,     setPairName]     = useState("");
-  const [pairPlatform, setPairPlatform] = useState("other");
   const [pairing,      setPairing]      = useState(false);
   const [syncing,      setSyncing]      = useState(false);
   const [pushCode,     setPushCode]     = useState("");
@@ -224,24 +221,19 @@ export const DevicesPage = memo(() => {
     }
     setPairing(true);
     const formatted = code.length >= 8 ? `${code.slice(0, 4)}-${code.slice(4, 8)}` : code;
-    const newDevice: LinkedDevice = {
-      code: formatted,
-      name: pairName.trim() || getMusicalDeviceName(formatted),
-      platform: pairPlatform,
-      pairedAt: new Date().toISOString(),
-      lastSyncAt: "",
-    };
-    saveLinkedDevices([...linkedDevices, newDevice]);
+    // Send pairing request — do NOT save locally yet.
+    // The device is saved when pair:confirmed arrives from the server
+    // (after the other device accepts), handled in usePresence.ts.
     presenceService.sendPairRequest(formatted, resolveDeviceName(settings.deviceName, myCode), "other");
-    setPairCode(""); setPairName(""); setPairPlatform("other");
+    setPairCode("");
     setPairing(false);
     notifications.show({
-      title: "Device linked!",
-      message: `"${newDevice.name}" added — notifying them now`,
-      color: "green",
-      icon: <IconCheck size={16} />,
+      title: "Pairing request sent",
+      message: "Waiting for the other device to accept…",
+      color: "blue",
+      autoClose: 30_000,
     });
-  }, [pairCode, pairName, pairPlatform, linkedDevices, myCode, saveLinkedDevices, settings.deviceName]);
+  }, [pairCode, linkedDevices, myCode, settings.deviceName]);
 
   const handleUnlink = useCallback((code: string) => {
     saveLinkedDevices(linkedDevices.filter((d) => d.code !== code));
@@ -390,29 +382,6 @@ export const DevicesPage = memo(() => {
                 setPairCode(raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw);
               }}
             />
-            <Group gap="sm">
-              <TextInput
-                label="Device name"
-                placeholder="e.g. My Linux PC"
-                value={pairName}
-                onChange={(e) => setPairName(e.currentTarget.value)}
-                style={{ flex: 1 }}
-              />
-              <Select
-                label="Platform"
-                data={[
-                  { value: "linux",   label: "Linux"   },
-                  { value: "android", label: "Android" },
-                  { value: "ipad",    label: "iPad"    },
-                  { value: "windows", label: "Windows" },
-                  { value: "mac",     label: "Mac"     },
-                  { value: "other",   label: "Other"   },
-                ]}
-                value={pairPlatform}
-                onChange={(v) => setPairPlatform(v ?? "other")}
-                style={{ width: 140 }}
-              />
-            </Group>
             <Button leftSection={<IconLink size={16} />} loading={pairing} onClick={handlePair} fullWidth>
               Link device
             </Button>

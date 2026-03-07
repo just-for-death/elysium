@@ -28,10 +28,32 @@ export interface Settings {
   invidiousUsername: string | null;
   invidiousLoginInstance: string | null;
   /** Maps local playlist DB ID → Invidious playlist ID for live sync */
-  invidiousPlaylistMappings: Record<number, string>;
+  invidiousPlaylistMappings: Record<string, string>;
+  /** Default privacy level for new playlists pushed to Invidious */
+  invidiousPlaylistPrivacy: "private" | "unlisted" | "public";
   /** When true, new local playlists are automatically created on Invidious */
   invidiousAutoPush: boolean;
-  // ListenBrainz scrobbling
+  // ── Auto queue curation ───────────────────────────────────────────────────
+  /**
+   * Which auto-queue mode is active.
+   * "off"         — disabled
+   * "discover"    — random new music (Apple charts + LB trending, fastest)
+   * "similar"     — same artist / vibe as current track (LB Radio API)
+   * "my_taste"    — personal listening style via LB token + Ollama AI
+   * Legacy modes kept for migration compat:
+   * "invidious" | "apple_charts" | "listenbrainz" | "lastfm_similar" | "ollama"
+   */
+  queueMode: string;
+  /** Last.fm API key for lastfm_similar (legacy) mode */
+  lastfmQueueApiKey: string | null;
+  // ── Ollama AI queue curation ──────────────────────────────────────────────
+  /** Whether AI queue curation via Ollama is enabled */
+  ollamaEnabled: boolean;
+  /** Base URL of the local Ollama server */
+  ollamaUrl: string | null;
+  /** Ollama model name to use for queue suggestions */
+  ollamaModel: string | null;
+  // ListenBrainz scrobbling + queue
   listenBrainzToken: string | null;
   listenBrainzUsername: string | null;
   listenBrainzEnabled: boolean;
@@ -40,11 +62,11 @@ export interface Settings {
   listenBrainzScrobblePercent: number;
   /** Cap in seconds: scrobble is triggered no later than this many seconds in (default: 240 = 4 min). 0 = no cap. */
   listenBrainzScrobbleMaxSeconds: number;
-  // ── Gotify push notifications ────────────────────────────────────────────────
+  // ── Gotify push notifications ─────────────────────────────────────────────
   gotifyUrl: string | null;
   gotifyToken: string | null;
   gotifyEnabled: boolean;
-  // ── Multi-device sync ─────────────────────────────────────────────────────────
+  // ── Multi-device sync ─────────────────────────────────────────────────────
   /** Auto-sync enabled */
   syncEnabled: boolean;
   /** Minutes between automatic syncs */

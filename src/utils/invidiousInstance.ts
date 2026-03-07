@@ -1,11 +1,11 @@
 import type { Instance } from "../types/interfaces/Instance";
 
 /** Default Invidious instance - music/audio focused, per user preference */
-export const DEFAULT_INVIDIOUS_URI = "https://inv.nadeko.net";
+export const DEFAULT_INVIDIOUS_URI = "https://yt.ikiagi.loseyourip.com";
 
 /** Fallback instance when API returns no usable instances */
 export const getDefaultInstance = (): Instance => ({
-  domain: "inv.nadeko.net",
+  domain: "yt.ikiagi.loseyourip.com",
   api: true,
   cors: true,
   flag: "🌐",
@@ -26,11 +26,26 @@ export const normalizeInstanceUri = (uri: string | null | undefined): string => 
   let s = uri.trim().replace(/\/+$/, "");
   // Fix "https//" or "http//" (missing colon)
   s = s.replace(/^(https?)\/\/(?!\/)/i, "$1://");
-  // Fix double protocol: "https://https://x" or "https://https//x"
-  s = s.replace(/^(https?):\/\/(https?)\/\/?/i, "$1://");
+  // Fix double protocol with colon: "https://https://x"
+  s = s.replace(/^(https?):\/\/(https?):\/\//i, "https://");
+  // Fix double protocol without colon: "https://https//x"
+  s = s.replace(/^(https?):\/\/(https?)\/\/?/i, "https://");
   // Ensure protocol exists
   if (!/^https?:\/\//i.test(s)) {
     s = `https://${s.replace(/^\/+/, "")}`;
   }
   return s;
 };
+
+/** Strip protocol prefix from a domain field, returning just the hostname[:port] */
+export const normalizeDomain = (domain: string | null | undefined): string => {
+  if (!domain || typeof domain !== "string") return "";
+  return domain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+};
+
+/** Sanitize a full Instance object: normalize URI and strip protocol from domain */
+export const sanitizeInstanceFields = (instance: Instance): Instance => ({
+  ...instance,
+  domain: normalizeDomain(instance.domain),
+  uri: normalizeInstanceUri(instance.uri) || instance.uri,
+});

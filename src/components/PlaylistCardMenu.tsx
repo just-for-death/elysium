@@ -14,6 +14,7 @@ import {
   IconDotsVertical,
   IconEdit,
   IconExternalLink,
+  IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
 import { type FC, memo, useState } from "react";
@@ -21,8 +22,12 @@ import { useTranslation } from "react-i18next";
 
 import type { CardPlaylist, CardVideo } from "../types/interfaces/Card";
 import { useSettings } from "../providers/Settings";
+import { useSetPlaylists } from "../providers/Playlist";
+import { db } from "../database";
 import { normalizeInstanceUri } from "../utils/invidiousInstance";
-import { pushPlaylistToInvidious } from "../services/invidiousAuth";
+import { pushPlaylistToInvidious, syncPlaylistToInvidious } from "../services/invidiousAuth";
+import { getMapping, setMapping } from "../utils/invidiousMappings";
+import { getPlaylists } from "../database/utils";
 import { ModalDeletePlaylist } from "./ModalDeletePlaylist";
 import { ModalUpdatePlaylist } from "./ModalUpdatePlaylist";
 
@@ -39,6 +44,7 @@ export const PlaylistCardMenu: FC<PlaylistCardMenuProps> = memo(({ playlist }) =
   const { t }     = useTranslation();
   const clipboard = useClipboard();
   const settings  = useSettings();
+  const setPlaylists = useSetPlaylists();
 
   const isCachePlaylist =
     (playlist as any).type === "cache" || playlist.title === "Cache";
@@ -109,8 +115,31 @@ export const PlaylistCardMenu: FC<PlaylistCardMenuProps> = memo(({ playlist }) =
         username:    settings.invidiousUsername!,
       };
       const videos = playlist.videos as CardVideo[];
-      const newId  = await pushPlaylistToInvidious(creds, playlist.title, videos, "unlisted");
-      const link   = `${normalizeInstanceUri(creds.instanceUrl)}/playlist?list=${newId}`;
+
+      // Check for an existing mapping — reuse it instead of creating a new playlist every time
+      const sharingLocalId = (playlist as any).ID as number | undefined;
+      const existingShareInvId = sharingLocalId ? getMapping(sharingLocalId) : undefined;
+
+      let shareInvId: string;
+      if (existingShareInvId) {
+        // Already pushed — sync (additive) then add missing videos.
+        // Returns false if remote was deleted — in that case recreate it.
+        const stillExists = await syncPlaylistToInvidious(creds, existingShareInvId, videos);
+        if (stillExists) {
+          shareInvId = existingShareInvId;
+        } else {
+          // Remote was deleted — recreate as unlisted and remap
+          shareInvId = await pushPlaylistToInvidious(creds, playlist.title, videos, "unlisted");
+          if (sharingLocalId) setMapping(sharingLocalId, shareInvId);
+        }
+        setPlaylists(getPlaylists());
+      } else {
+        shareInvId = await pushPlaylistToInvidious(creds, playlist.title, videos, "unlisted");
+        if (sharingLocalId) setMapping(sharingLocalId, shareInvId);
+        setPlaylists(getPlaylists());
+      }
+
+      const link = `${normalizeInstanceUri(creds.instanceUrl)}/playlist?list=${shareInvId}`;
       clipboard.copy(link);
       notifications.show({
         title: "Shared via Invidious",
@@ -129,7 +158,11 @@ export const PlaylistCardMenu: FC<PlaylistCardMenuProps> = memo(({ playlist }) =
     }
   };
 
-  // ── Push to Invidious (explicit — keeps existing; share creates unlisted) ──
+  // ── Push to Invidious (first time) or Sync (already pushed) ──────────────
+
+  const localId = (playlist as any).ID as number | undefined;
+  const existingInvId = localId ? getMapping(localId) : undefined;
+  const alreadyPushed = !!existingInvId;
 
   const handlePushToInvidious = async () => {
     if (!isInvLogged) {
@@ -152,17 +185,44 @@ export const PlaylistCardMenu: FC<PlaylistCardMenuProps> = memo(({ playlist }) =
         username:    settings.invidiousUsername!,
       };
       const videos = playlist.videos as CardVideo[];
-      const newId  = await pushPlaylistToInvidious(creds, playlist.title, videos, "private");
-      const link   = `${normalizeInstanceUri(creds.instanceUrl)}/playlist?list=${newId}`;
-      notifications.show({
-        title: "Pushed to Invidious",
-        message: `"${playlist.title}" saved as a private playlist on your Invidious account.`,
-        color: "teal",
-        autoClose: 6000,
-      });
+
+      if (alreadyPushed) {
+        // Already linked — sync (additive) then add missing videos.
+        // syncPlaylistToInvidious returns false when the remote playlist no longer
+        // exists (deleted on Invidious). In that case recreate it and remap.
+        const stillExists = await syncPlaylistToInvidious(creds, existingInvId!, videos);
+        if (!stillExists) {
+          // Remote playlist was deleted — recreate and update mapping
+          const privacy = (settings as any).invidiousPlaylistPrivacy ?? "private";
+          const newId = await pushPlaylistToInvidious(creds, playlist.title, videos, privacy);
+          if (localId && newId) setMapping(localId, newId);
+        }
+        setPlaylists(getPlaylists());
+        notifications.show({
+          title: stillExists ? "Synced to Invidious" : "Recreated on Invidious",
+          message: stillExists
+            ? `"${playlist.title}" — changes synced to your Invidious playlist.`
+            : `"${playlist.title}" — remote playlist was gone, recreated it.`,
+          color: "teal",
+          autoClose: 6000,
+        });
+      } else {
+        // First push — create new playlist and save the mapping
+        const newId = await pushPlaylistToInvidious(creds, playlist.title, videos, "private");
+        if (localId && newId) {
+          setMapping(localId, newId);
+          setPlaylists(getPlaylists()); // refresh context so menu shows "Sync" next time
+        }
+        notifications.show({
+          title: "Pushed to Invidious",
+          message: `"${playlist.title}" saved as a private playlist on your Invidious account.`,
+          color: "teal",
+          autoClose: 6000,
+        });
+      }
     } catch (e: any) {
       notifications.show({
-        title: "Push failed",
+        title: alreadyPushed ? "Sync failed" : "Push failed",
         message: e?.message ?? "Unknown error.",
         color: "red",
       });
@@ -250,11 +310,11 @@ export const PlaylistCardMenu: FC<PlaylistCardMenuProps> = memo(({ playlist }) =
                 Share via Invidious link
               </Menu.Item>
               <Menu.Item
-                leftSection={<IconArrowUp size={14} />}
+                leftSection={alreadyPushed ? <IconRefresh size={14} /> : <IconArrowUp size={14} />}
                 onClick={handlePushToInvidious}
-                disabled={!playlist.videos?.length}
+                disabled={!playlist.videos?.length || pushingToInv}
               >
-                Push to Invidious account
+                {alreadyPushed ? "Sync to Invidious" : "Push to Invidious account"}
               </Menu.Item>
               <Menu.Divider />
             </>

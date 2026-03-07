@@ -3,8 +3,10 @@ import { useMediaQuery } from "@mantine/hooks";
 import {
   IconCategory,
   IconDots,
+  IconHeart,
   IconHistory,
   IconHome2,
+  IconPlaylist,
   IconSettings,
   IconTrendingUp,
   IconUserHeart,
@@ -53,10 +55,13 @@ const MoreSheet = memo(({ onClose, activePath }: { onClose: () => void; activePa
   }, [navigate, onClose]);
 
   const items: SheetItem[] = [
-    { icon: <IconUsers size={20} />,    label: t("navigation.most-popular"), path: "/most-popular" },
-    { icon: <IconCategory size={20} />, label: t("genre.title"),             path: "/genres"       },
-    { icon: <IconUserHeart size={20} />,label: "Following",                  path: "/following"    },
-    { icon: <IconSettings size={20} />, label: t("navigation.settings"),     path: "/settings"     },
+    { icon: <IconTrendingUp size={20} />, label: t("navigation.trending"),     path: "/trending"     },
+    { icon: <IconUsers size={20} />,      label: t("navigation.most-popular"), path: "/most-popular" },
+    { icon: <IconCategory size={20} />,   label: t("genre.title"),             path: "/genres"       },
+    { icon: <IconUserHeart size={20} />,  label: "Following",                  path: "/following"    },
+    { icon: <IconHistory size={20} />,    label: t("navigation.history"),      path: "/history"      },
+    { icon: <IconWifi size={20} />,       label: "Devices",                    path: "/devices"      },
+    { icon: <IconSettings size={20} />,   label: t("navigation.settings"),     path: "/settings"     },
   ];
 
   return (
@@ -66,18 +71,21 @@ const MoreSheet = memo(({ onClose, activePath }: { onClose: () => void; activePa
       {/* Sheet */}
       <div className={classes.sheet} role="menu">
         <div className={classes.sheetHandle} />
-        {items.map((item) => (
-          <button
-            key={item.path}
-            className={classes.sheetItem}
-            data-active={activePath === item.path}
-            onClick={() => go(item.path)}
-            role="menuitem"
-          >
-            {item.icon}
-            {item.label}
-          </button>
-        ))}
+        <div className={classes.sheetTitle}>More</div>
+        <div className={classes.sheetGrid}>
+          {items.map((item) => (
+            <button
+              key={item.path}
+              className={classes.sheetItem}
+              data-active={activePath === item.path}
+              onClick={() => go(item.path)}
+              role="menuitem"
+            >
+              <span className={classes.sheetItemIcon}>{item.icon}</span>
+              <span className={classes.sheetItemLabel}>{item.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -86,7 +94,8 @@ const MoreSheet = memo(({ onClose, activePath }: { onClose: () => void; activePa
 // ── Main export ────────────────────────────────────────────────────────────────
 
 export const MobileNavigationContainer = memo(() => {
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  // Show on mobile AND tablet (iPad) — hide only on large desktop
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
   const navigate  = useStableNavigate();
   const location  = useLocation();
   const { t }     = useTranslation();
@@ -99,15 +108,20 @@ export const MobileNavigationContainer = memo(() => {
   const hasDevices = devices.length > 0;
 
   const path = location.pathname;
-  // "More" tab is active if current path belongs to one of its sheet items
-  const moreActive = ["/most-popular", "/genres", "/following", "/settings"].includes(path);
+  const moreActive = [
+    "/most-popular", "/genres", "/following",
+    "/settings", "/trending", "/history", "/devices",
+  ].includes(path);
 
   const go = useCallback((p: string) => {
     setMoreOpen(false);
     navigate(p);
   }, [navigate]);
 
-  if (!isMobile) return null;
+  if (isDesktop) return null;
+
+  // iPad uses a wider 6-tab layout; phone uses 5
+  const isTablet = window.innerWidth >= 768;
 
   return (
     <>
@@ -125,42 +139,41 @@ export const MobileNavigationContainer = memo(() => {
           onClick={() => go("/")}
         />
 
-        {/* Trending */}
+        {/* Favorites */}
         <Tab
-          icon={<IconTrendingUp size={22} stroke={path === "/trending" ? 2 : 1.5} />}
-          label={t("navigation.trending")}
-          active={path === "/trending"}
-          onClick={() => go("/trending")}
+          icon={<IconHeart size={22} stroke={path === "/favorites" ? 2 : 1.5} />}
+          label="Favorites"
+          active={path === "/favorites"}
+          onClick={() => go("/favorites")}
         />
 
-        {/* History */}
+        {/* Playlists */}
         <Tab
-          icon={<IconHistory size={22} stroke={path === "/history" ? 2 : 1.5} />}
-          label={t("navigation.history")}
-          active={path === "/history"}
-          onClick={() => go("/history")}
+          icon={<IconPlaylist size={22} stroke={path === "/playlists" ? 2 : 1.5} />}
+          label="Playlists"
+          active={path === "/playlists"}
+          onClick={() => go("/playlists")}
         />
 
-        {/* Devices — navigates to /devices page for full remote control */}
-        <Tab
-          icon={
-            hasDevices ? (
-              <Indicator
-                color={anyPlaying ? "teal" : anyOnline ? "blue" : "gray"}
-                processing={anyPlaying}
-                size={7}
-                offset={2}
-              >
-                <IconWifi size={22} stroke={path === "/devices" ? 2 : 1.5} />
-              </Indicator>
-            ) : (
-              <IconWifi size={22} stroke={path === "/devices" ? 2 : 1.5} />
-            )
-          }
-          label="Devices"
-          active={path === "/devices"}
-          onClick={() => go("/devices")}
-        />
+        {/* Trending — only show on tablet where there's more room */}
+        {isTablet && (
+          <Tab
+            icon={<IconTrendingUp size={22} stroke={path === "/trending" ? 2 : 1.5} />}
+            label={t("navigation.trending")}
+            active={path === "/trending"}
+            onClick={() => go("/trending")}
+          />
+        )}
+
+        {/* History — tablet only */}
+        {isTablet && (
+          <Tab
+            icon={<IconHistory size={22} stroke={path === "/history" ? 2 : 1.5} />}
+            label={t("navigation.history")}
+            active={path === "/history"}
+            onClick={() => go("/history")}
+          />
+        )}
 
         {/* More */}
         <Tab

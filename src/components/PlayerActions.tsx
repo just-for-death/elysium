@@ -9,7 +9,7 @@ import { type FC, memo } from "react";
 import { useTranslation } from "react-i18next";
 
 import { usePlayVideo } from "../hooks/usePlayVideo";
-import { usePlayerAudio, usePlayerState } from "../providers/Player";
+import { useAudioElement, usePlayerStatus } from "../providers/Player";
 import { usePlayerMode } from "../providers/PlayerMode";
 import { usePlayerPlaylist } from "../providers/PlayerPlaylist";
 import { usePreviousNextVideos } from "../providers/PreviousNextTrack";
@@ -51,12 +51,14 @@ interface ButtonNextVideoProps extends ActionIconProps {
 
 const ButtonPlayPause: FC<ButtonNextVideoProps> = memo(
   ({ size, radius, iconSize }) => {
-    const playerState = usePlayerState();
-    const playerAudio = usePlayerAudio();
+    const playerState = usePlayerStatus();
+    const getAudioEl = useAudioElement();
 
     const handlePlayPause = () => {
-      // @ts-ignore
-      const audio = playerAudio?.current?.audioEl.current as HTMLAudioElement;
+      const audio = getAudioEl();
+
+      // Fix #2: Guard against null audio element (e.g. before a track has loaded)
+      if (!audio) return;
 
       if (audio.paused) {
         audio.play();

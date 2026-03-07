@@ -168,17 +168,39 @@ const mergeRemote = (
     const localTitles = new Set(localPlaylists.map((p) => p.title));
 
     for (const pl of remotePlaylists) {
+      // 1. Match by syncId first — survives renames, prevents duplicates
+      if (pl.syncId) {
+        const byId = localPlaylists.find((p) => p.syncId === pl.syncId);
+        if (byId) {
+          const localVideos = byId.videos ?? [];
+          const localVideoIds = new Set(localVideos.map((v: any) => v.videoId));
+          const newVideos = (pl.videos ?? []).filter((v: any) => !localVideoIds.has(v.videoId));
+          const merged = [...localVideos, ...newVideos];
+          const videosActuallyChanged = merged.length !== localVideos.length ||
+            merged.some((v: any, i: number) => v.videoId !== (localVideos as any[])[i]?.videoId);
+          if (videosActuallyChanged) {
+            updatePlaylistVideos(byId.title, merged as CardVideo[]);
+            updatedPlaylists++;
+          }
+          continue;
+        }
+      }
+      // 2. Fall back to title match (legacy playlists without syncId yet)
       if (!localTitles.has(pl.title)) {
-        // Brand-new playlist on remote — import it
+        // Brand-new playlist on remote — import it, carrying all identity fields
         importPlaylist({ ...pl, type: "playlist", videoCount: pl.videos?.length ?? 0 });
         newPlaylists++;
       } else {
-        // Playlist exists locally — merge videos (add remote-only ones)
+        // Playlist exists locally — add new videos (additive only)
         const local = localPlaylists.find((p) => p.title === pl.title);
-        const localVideoIds = new Set((local?.videos ?? []).map((v: any) => v.videoId));
+        const localVideos = local?.videos ?? [];
+        const localVideoIds = new Set(localVideos.map((v: any) => v.videoId));
         const newVideos = (pl.videos ?? []).filter((v: any) => !localVideoIds.has(v.videoId));
-        if (newVideos.length > 0) {
-          updatePlaylistVideos(pl.title, [...(local?.videos ?? []), ...newVideos] as CardVideo[]);
+        const merged = [...localVideos, ...newVideos];
+        const videosActuallyChanged = merged.length !== localVideos.length ||
+          merged.some((v: any, i: number) => v.videoId !== (localVideos as any[])[i]?.videoId);
+        if (videosActuallyChanged) {
+          updatePlaylistVideos(pl.title, merged as CardVideo[]);
           updatedPlaylists++;
         }
       }

@@ -239,6 +239,44 @@ const initDb = (isRetry = false) => {
     db.commit();
   }
 
+  // Invidious playlist privacy default
+  if (!db.columnExists("settings", "invidiousPlaylistPrivacy")) {
+    db.alterTable("settings", "invidiousPlaylistPrivacy", "private");
+    db.commit();
+  }
+
+  // ListenBrainz scrobble threshold columns
+  if (!db.columnExists("settings", "listenBrainzScrobblePercent")) {
+    db.alterTable("settings", "listenBrainzScrobblePercent", 50);
+    db.alterTable("settings", "listenBrainzScrobbleMaxSeconds", 240);
+    db.commit();
+  }
+
+  // Ollama AI queue columns
+  if (!db.columnExists("settings", "ollamaEnabled")) {
+    db.alterTable("settings", "ollamaEnabled", false);
+    db.alterTable("settings", "ollamaUrl", "");
+    db.alterTable("settings", "ollamaModel", "llama3.2:3b");
+    db.commit();
+  }
+
+  // Auto-queue mode (replaces ollamaEnabled as the primary queue switch)
+  if (!db.columnExists("settings", "queueMode")) {
+    db.alterTable("settings", "queueMode", "off");
+    db.alterTable("settings", "lastfmQueueApiKey", "");
+    db.commit();
+  }
+
+  // Playlist sync identity fields
+  if (!db.columnExists("playlists", "syncId")) {
+    db.alterTable("playlists", "syncId", "");
+    db.commit();
+  }
+  if (!db.columnExists("playlists", "lbPlaylistId")) {
+    db.alterTable("playlists", "lbPlaylistId", "");
+    db.commit();
+  }
+
   return db;
 };
 

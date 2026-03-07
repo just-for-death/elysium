@@ -5,13 +5,10 @@ import type { FavoritePlaylist, Playlist } from "../types/interfaces/Playlist";
 import type { SearchHistory } from "../types/interfaces/Search";
 import type { Instance } from "../types/interfaces/Instance";
 import type { Settings } from "../types/interfaces/Settings";
-import { normalizeInstanceUri } from "../utils/invidiousInstance";
+import { sanitizeInstanceFields } from "../utils/invidiousInstance";
 
-const sanitizeInstanceUri = (inst: Instance | null | undefined): Instance | null | undefined => {
-  if (!inst) return inst;
-  const uri = normalizeInstanceUri(inst.uri);
-  return uri ? { ...inst, uri } : inst;
-};
+const sanitizeInstanceUri = (inst: Instance | null | undefined): Instance | null | undefined =>
+  inst ? sanitizeInstanceFields(inst) : inst;
 
 export const getSettings = (): Settings => {
   const settings = db.queryAll("settings", { query: { ID: 1 } })[0] ?? {};
@@ -22,8 +19,11 @@ export const getSettings = (): Settings => {
     listenBrainzUsername: settings.listenBrainzUsername || null,
     listenBrainzEnabled: settings.listenBrainzEnabled ?? false,
     listenBrainzPlayingNow: settings.listenBrainzPlayingNow ?? true,
+    listenBrainzScrobblePercent: settings.listenBrainzScrobblePercent ?? 50,
+    listenBrainzScrobbleMaxSeconds: settings.listenBrainzScrobbleMaxSeconds ?? 240,
     currentInstance: sanitizeInstanceUri(settings.currentInstance),
     defaultInstance: sanitizeInstanceUri(settings.defaultInstance),
+    customInstances: (settings.customInstances ?? []).map(sanitizeInstanceUri).filter(Boolean) as Instance[],
     gotifyUrl: settings.gotifyUrl || null,
     gotifyToken: settings.gotifyToken || null,
     gotifyEnabled: settings.gotifyEnabled ?? false,
@@ -35,7 +35,13 @@ export const getSettings = (): Settings => {
     invidiousUsername: settings.invidiousUsername || null,
     invidiousLoginInstance: settings.invidiousLoginInstance || null,
     invidiousPlaylistMappings: settings.invidiousPlaylistMappings ?? {},
+    invidiousPlaylistPrivacy: (settings.invidiousPlaylistPrivacy as "private" | "unlisted" | "public") || "private",
     invidiousAutoPush: settings.invidiousAutoPush ?? false,
+    queueMode: (settings as any).queueMode ?? "off",
+    lastfmQueueApiKey: (settings as any).lastfmQueueApiKey || null,
+    ollamaEnabled: settings.ollamaEnabled ?? false,
+    ollamaUrl: settings.ollamaUrl || null,
+    ollamaModel: settings.ollamaModel || "llama3.2:3b",
   };
 };
 
@@ -82,13 +88,17 @@ export const importVideosToFavorites = (importedCards: Card[]): void => {
   db.commit();
 };
 
-export const importPlaylist = (playlist: CardPlaylist): void => {
+export const importPlaylist = (playlist: CardPlaylist & { syncId?: string; lbPlaylistId?: string }): void => {
   db.insert("playlists", {
     createdAt: new Date().toISOString(),
     title: playlist.title,
     videos: playlist.videos,
     videoCount: playlist.videoCount,
+    playlistId: playlist.playlistId ?? "",
     type: "playlist",
+    // Always assign a syncId — carried over from remote device or freshly generated
+    syncId: playlist.syncId || crypto.randomUUID(),
+    lbPlaylistId: playlist.lbPlaylistId ?? "",
   });
   db.commit();
 };
@@ -97,6 +107,7 @@ export const updatePlaylistVideos = (title: string, videos: CardVideo[]) => {
   db.update("playlists", { title }, (raw: Playlist) => ({
     ...raw,
     videos,
+    videoCount: videos.length,
   }));
   db.commit();
 };

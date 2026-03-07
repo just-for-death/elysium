@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../database";
 import { getPlaylist, getPlaylists } from "../database/utils";
+import { getMapping } from "../utils/invidiousMappings";
 import { useIsLocalPlaylist } from "../hooks/useIsLocalPlaylist";
 import { useSetPlaylists } from "../providers/Playlist";
 import { useSettings } from "../providers/Settings";
+import { usePresenceContext } from "../providers/Presence";
 import { removeVideoFromInvidiousPlaylist, type InvidiousCredentials } from "../services/invidiousAuth";
 import { normalizeInstanceUri } from "../utils/invidiousInstance";
 import type { CardVideo } from "../types/interfaces/Card";
@@ -26,6 +28,7 @@ export const ModalDeleteFromPlaylist: FC<ModalDeleteFromPlaylistProps> = memo(
     const settings = useSettings();
     const { playlistId } = useIsLocalPlaylist();
     const { t } = useTranslation();
+    const { sendVideoDelete } = usePresenceContext();
 
     const isLoggedIn = !!settings.invidiousSid && !!settings.invidiousUsername;
     const creds: InvidiousCredentials | null = isLoggedIn
@@ -60,18 +63,43 @@ export const ModalDeleteFromPlaylist: FC<ModalDeleteFromPlaylistProps> = memo(
         (row: Playlist) => ({
           ...row,
           videos: updatedVideos,
+          videoCount: updatedVideos.length,
         }),
       );
       db.commit();
+
+      // Propagate deletion to all paired devices (online = immediate, offline = queued)
+      sendVideoDelete(
+        (playlist as any).syncId ?? "",
+        playlist.title,
+        video.videoId,
+      );
+
       setPlaylists(getPlaylists());
 
       // Sync removal to Invidious if this playlist has a mapping
       if (creds && playlistId) {
-        const invId = settings.invidiousPlaylistMappings?.[Number(playlistId)];
+        const invId = getMapping(playlistId);
         if (invId) {
-          removeVideoFromInvidiousPlaylist(creds, invId, video.videoId).catch(() => {
-            // Silent fail — local change already persisted
-          });
+          // Invidious DELETE requires the video's indexId, NOT videoId.
+          // Fetch the remote playlist to find the correct indexId for this video.
+          fetch(`/api/invidious/playlists/${invId}`, {
+            headers: {
+              "X-Invidious-Instance": creds.instanceUrl,
+              "X-Invidious-SID": creds.sid,
+              "Content-Type": "application/json",
+            },
+          })
+            .then(r => r.ok ? r.json() : null)
+            .then(remote => {
+              const remoteVideo = (remote?.videos ?? []).find((v: any) => v.videoId === video.videoId);
+              const indexId: string | undefined = remoteVideo?.indexId;
+              if (!indexId) return; // video not in remote playlist, nothing to do
+              return removeVideoFromInvidiousPlaylist(creds, invId, indexId);
+            })
+            .catch(() => {
+              // Silent fail — local change already persisted
+            });
         }
       }
 

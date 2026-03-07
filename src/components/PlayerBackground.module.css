@@ -15,5 +15,12 @@
   ) !important;
   /* Blend with the color extracted from the track */
   mix-blend-mode: normal;
+  /* PERF FIX (iPad): promote to own GPU compositing layer.
+     backdrop-filter on the main layer causes the browser to repaint on every
+     React render tick (every 500ms during playback). On its own layer the blur
+     is composited by the GPU with zero CPU involvement after the first paint. */
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 

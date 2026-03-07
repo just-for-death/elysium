@@ -25,17 +25,19 @@ const PageContainer = memo(() => {
     return <LoadingOverlay visible />;
   }
 
+  const videos = playlist.videos ?? [];
+
   return (
     <>
       <PageHeader title={playlist.title} canGoBack />
-      {playlist.videos.length === 0 ? (
+      {videos.length === 0 ? (
         <Alert title={playlist.title}>
           <Text>
             <strong>{playlist.title}</strong> {t("is.empty")}
           </Text>
         </Alert>
       ) : (
-        <CardList data={playlist.videos as CardVideo[]} />
+        <CardList data={videos as CardVideo[]} />
       )}
     </>
   );

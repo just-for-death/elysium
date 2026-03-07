@@ -1,13 +1,19 @@
 /**
- * Invidious Account Auth + Playlist Sync
+ * Invidious Account Auth + Playlist Sync (Bidirectional)
  *
  * All Invidious API calls go through dedicated server-side endpoints.
  * The server uses "Cookie: SID=<value>" directly — no token format guessing,
  * no general proxy, no Authorization: Bearer complications.
  *
+ * Sync Strategy:
+ * - pushPlaylistToInvidious: CREATE a new playlist on Invidious
+ * - syncPlaylistToInvidious: Add missing videos to existing remote playlist (returns false if playlist gone)
+ * - pullPlaylistsFromInvidious: Import/update remote playlists into local DB
+ *
  * Server endpoints:
  *   POST   /api/invidious/login                        – form login → SID
  *   GET    /api/invidious/playlists                    – list playlists
+ *   GET    /api/invidious/playlists/:id                – fetch single playlist with videos
  *   POST   /api/invidious/playlists                    – create playlist
  *   POST   /api/invidious/playlists/:id/videos         – add video
  *   DELETE /api/invidious/playlists/:id/videos/:vid    – remove video
@@ -31,6 +37,8 @@ export interface InvidiousPlaylist {
   videoCount: number;
   videos: Array<{
     videoId: string;
+    indexId: string;   // per Invidious API — required for DELETE /videos/:index
+    index: number;
     title: string;
     lengthSeconds: number;
     videoThumbnails: Array<{ quality: string; url: string }>;
@@ -49,6 +57,16 @@ export interface InvidiousLoginResult {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
+
+// Module-level mutex: prevents concurrent playlist pushes across React component
+// instances (e.g. React StrictMode double-mounts). Both instances share this lock.
+let _pushInProgress = false;
+export function acquirePushLock(): boolean {
+  if (_pushInProgress) return false;
+  _pushInProgress = true;
+  return true;
+}
+export function releasePushLock(): void { _pushInProgress = false; }
 
 function authHeaders(creds: InvidiousCredentials): Record<string, string> {
   return {
@@ -97,6 +115,26 @@ export async function fetchInvidiousPlaylists(creds: InvidiousCredentials): Prom
   return Array.isArray(data) ? data : [];
 }
 
+export async function fetchInvidiousPlaylist(
+  creds: InvidiousCredentials,
+  playlistId: string,
+): Promise<InvidiousPlaylist | null> {
+  // Use the single-playlist endpoint which returns the full video list.
+  // The list endpoint (GET /api/v1/auth/playlists) is known to return videos:[]
+  // for each playlist, making it useless for deduplication during sync.
+  const res = await fetch(`/api/invidious/playlists/${playlistId}`, {
+    method: "GET",
+    headers: authHeaders(creds),
+  });
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  return data ?? null;
+}
+
+/**
+ * Create a new playlist on Invidious.
+ * Returns the playlist ID if successful, null otherwise.
+ */
 export async function createInvidiousPlaylist(
   creds: InvidiousCredentials,
   title: string,
@@ -134,11 +172,15 @@ export async function addVideoToInvidiousPlaylist(
 export async function removeVideoFromInvidiousPlaylist(
   creds: InvidiousCredentials,
   playlistId: string,
-  videoId: string,
+  indexId: string,  // Invidious API requires the video's indexId, NOT the videoId
 ): Promise<void> {
-  await fetch(`/api/invidious/playlists/${playlistId}/videos/${videoId}`, {
+  const res = await fetch(`/api/invidious/playlists/${playlistId}/videos/${indexId}`, {
     method: "DELETE", headers: authHeaders(creds),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error ?? `HTTP ${res.status}`);
+  }
 }
 
 export async function deleteInvidiousPlaylist(creds: InvidiousCredentials, playlistId: string): Promise<void> {
@@ -147,17 +189,144 @@ export async function deleteInvidiousPlaylist(creds: InvidiousCredentials, playl
   });
 }
 
+/**
+ * Sync a local playlist to an existing Invidious playlist by ID.
+ * Adds any missing videos to the remote playlist (additive only).
+ * Does NOT modify playlist title/privacy.
+ *
+ * Returns true on success.
+ * Returns false when the remote playlist no longer exists (stale mapping).
+ */
+export async function syncPlaylistToInvidious(
+  creds: InvidiousCredentials,
+  playlistId: string,
+  videos: CardVideo[],
+): Promise<boolean> {
+  // Fetch the specific playlist by ID — NOT the full list.
+  // GET /api/v1/auth/playlists returns videos:[] for every playlist (known Invidious bug).
+  // GET /api/v1/auth/playlists/:id returns the actual video list.
+  const remote = await fetchInvidiousPlaylist(creds, playlistId);
+
+  // Playlist was deleted on Invidious (or never existed) — stale mapping.
+  // Signal to caller so it can recreate and update the mapping.
+  if (!remote) return false;
+
+  const remoteIds = new Set((remote.videos ?? []).map((v: any) => v.videoId));
+
+  const instanceBase = normalizeInstanceUri(creds.instanceUrl);
+
+  for (const v of videos) {
+    let realVideoId = v.videoId;
+
+    // Resolve Apple Music virtual IDs to real YouTube video IDs
+    if (realVideoId.startsWith("am:")) {
+      try {
+        const parsed = parseAppleMusicVideoId(realVideoId);
+        if (parsed) {
+          const query = `${parsed.artist} - ${parsed.title}`;
+          const searchUrl = `${instanceBase}/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance&page=1`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 12000);
+          try {
+            const res = await fetch(searchUrl, { signal: controller.signal });
+            if (res.ok) {
+              const data = await res.json();
+              const match = Array.isArray(data)
+                ? data.find((r: any) => r.type === "video" && r.videoId && r.lengthSeconds > 0 && !r.liveNow)
+                : null;
+              if (match) realVideoId = match.videoId;
+              else continue;
+            } else {
+              continue;
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    // Skip videos already in the remote playlist
+    if (remoteIds.has(realVideoId)) continue;
+
+    try {
+      await addVideoToInvidiousPlaylist(creds, playlistId, realVideoId);
+    } catch {
+      // skip failed individual videos — partial sync is fine
+    }
+  }
+  return true;
+}
+
+/**
+ * Push a local playlist to Invidious — always creates a new playlist.
+ * Returns the new playlist ID.
+ */
 export async function pushPlaylistToInvidious(
   creds: InvidiousCredentials,
   title: string,
   videos: CardVideo[],
   privacy: "public" | "private" | "unlisted" = "private",
 ): Promise<string> {
-  const playlistId = await createInvidiousPlaylist(creds, title, privacy);
-  if (!playlistId) throw new Error("Failed to create playlist — no ID returned");
+  const newId = await createInvidiousPlaylist(creds, title, privacy);
+  if (!newId) throw new Error("Failed to create playlist — no ID returned");
+  const playlistId = newId;
+
+  const instanceBase = normalizeInstanceUri(creds.instanceUrl);
+
   for (const v of videos) {
-    try { await addVideoToInvidiousPlaylist(creds, playlistId, v.videoId); }
-    catch { /* skip — partial sync is fine */ }
+    let realVideoId = v.videoId;
+
+    // Resolve Apple Music virtual IDs to real YouTube video IDs
+    if (realVideoId.startsWith("am:")) {
+      try {
+        const parsed = parseAppleMusicVideoId(realVideoId);
+        if (parsed) {
+          const query = `${parsed.artist} - ${parsed.title}`;
+          const searchUrl = `${instanceBase}/api/v1/search?q=${encodeURIComponent(query)}&type=video&sort_by=relevance&page=1`;
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 12000);
+          try {
+            const res = await fetch(searchUrl, { signal: controller.signal });
+            if (res.ok) {
+              const data = await res.json();
+              const match = Array.isArray(data)
+                ? data.find((r: any) => r.type === "video" && r.videoId && r.lengthSeconds > 0 && !r.liveNow)
+                : null;
+              if (match) realVideoId = match.videoId;
+              else continue; // can't resolve — skip this track
+            } else {
+              continue; // skip unresolvable
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+      } catch {
+        continue; // skip on error — partial sync is fine
+      }
+    }
+
+    try {
+      await addVideoToInvidiousPlaylist(creds, playlistId, realVideoId);
+    } catch {
+      // skip failed individual videos — partial sync is fine
+    }
   }
+
   return playlistId;
+}
+
+function parseAppleMusicVideoId(videoId: string): { artist: string; title: string } | null {
+  if (!videoId.startsWith("am:")) return null;
+  const rest = videoId.slice(3); // after "am:"
+  const idx1 = rest.indexOf(":");
+  const idx2 = rest.indexOf(":", idx1 + 1);
+  if (idx1 === -1 || idx2 === -1) return null;
+  return {
+    artist: decodeURIComponent(rest.slice(idx1 + 1, idx2)),
+    title: decodeURIComponent(rest.slice(idx2 + 1)),
+  };
 }

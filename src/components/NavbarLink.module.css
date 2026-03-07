@@ -71,3 +71,9 @@
     padding: 7px 20px;
   }
 }
+
+.linkCollapsed {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}

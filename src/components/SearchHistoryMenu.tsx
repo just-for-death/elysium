@@ -4,13 +4,13 @@ import { type FC, type ReactNode } from "react";
 
 import { getSearchHistory } from "../database/utils";
 
-interface SearcHistoryMenuProps {
+interface SearchHistoryMenuProps {
   opened: boolean;
   onSelect: (value: string) => void;
   children: ReactNode;
 }
 
-export const SearcHistoryMenu: FC<SearcHistoryMenuProps> = ({
+export const SearchHistoryMenu: FC<SearchHistoryMenuProps> = ({
   opened,
   onSelect,
   children,

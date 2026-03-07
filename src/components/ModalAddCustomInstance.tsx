@@ -1,9 +1,9 @@
 import {
   Button,
-  Checkbox,
   Flex,
   Select,
   Space,
+  Switch,
   TextInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
@@ -49,10 +49,12 @@ export const ModalAddCustomInstance = memo(() => {
     type: string;
     isDefault: boolean;
   }) => {
+    // Strip any protocol prefix the user may have included in the domain field
+    const cleanDomain = instance.domain.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
     const customInstance = {
-      domain: instance.domain,
+      domain: cleanDomain,
       type: instance.type,
-      uri: `${instance.type}://${instance.domain}`,
+      uri: `${instance.type}://${cleanDomain}`,
       custom: true,
     };
     db.update("settings", { ID: 1 }, (data: Settings) => ({
@@ -112,9 +114,10 @@ export const ModalAddCustomInstance = memo(() => {
             ]}
           />
           <Space h="lg" />
-          <Checkbox
+          <Switch
             label={t("modal.instance.add.default")}
-            {...form.getInputProps("isDefault")}
+            checked={form.values.isDefault}
+            onChange={(e) => form.setFieldValue("isDefault", e.currentTarget.checked)}
           />
           <Flex gap={8} justify="flex-end" mt="xl">
             <Button onClick={() => setOpened(false)} color="gray">

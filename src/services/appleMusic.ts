@@ -16,7 +16,7 @@ import { log } from "../utils/logger";
 
 // ─── ID Prefixes ──────────────────────────────────────────────────────────────
 
-export const AM_VIDEO_PREFIX = "am:";
+const AM_VIDEO_PREFIX = "am:";
 export const AM_ARTIST_PREFIX = "am_artist:";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -113,58 +113,75 @@ export const searchAppleMusic = async (
   query: string,
   limit = 20,
 ): Promise<Array<CardVideo | CardChannel>> => {
-  const params = new URLSearchParams({
-    term: query,
-    media: "music",
-    entity: "musicTrack,musicArtist",
-    limit: String(Math.min(limit, 50)),
-    lang: "en_us",
-  });
-
-  const url = `https://itunes.apple.com/search?${params}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`iTunes API ${res.status}`);
-    const data: ItunesSearchResponse = await res.json();
+    // Try musicTrack+musicArtist first, fall back to musicTrack only if needed
+    for (const entity of ["musicTrack,musicArtist", "musicTrack"]) {
+      const params = new URLSearchParams({
+        term: query,
+        media: "music",
+        entity,
+        limit: String(Math.min(limit, 50)),
+        lang: "en_us",
+      });
+      const url = `/api/itunes-proxy/search?${params}`;
 
-    const cards: Array<CardVideo | CardChannel> = [];
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (res.status === 403 || res.status === 429) {
+          // Rate limited — throw so caller falls back to Invidious
+          throw new Error(`iTunes API rate limited: ${res.status}`);
+        }
+        if (!res.ok) continue; // try next entity variant
 
-    for (const item of data.results) {
-      if (item.wrapperType === "track") {
-        const t = item as ItunesTrack;
-        if (!t.trackId || !t.trackName) continue;
-        cards.push({
-          type: "video",
-          videoId: encodeAppleMusicVideoId(t.trackId, t.artistName ?? "", t.trackName),
-          title: `${t.trackName}${t.collectionName ? ` — ${t.collectionName}` : ""}`,
-          thumbnail: upgradeArtwork(t.artworkUrl100),
-          liveNow: false,
-          lengthSeconds: t.trackTimeMillis ? Math.floor(t.trackTimeMillis / 1000) : 0,
-          videoThumbnails: [],
-          // Stash artist in author field via the type system
-        } as CardVideo & { author?: string; _appleMusicArtist?: string });
-      } else if (item.wrapperType === "artist") {
-        const a = item as ItunesArtist;
-        if (!a.artistId || !a.artistName) continue;
-        cards.push({
-          type: "channel",
-          author: a.artistName,
-          authorId: `${AM_ARTIST_PREFIX}${a.artistId}`,
-          authorVerified: false,
-          videoCount: 0,
-          description: a.primaryGenreName ?? "Artist on Apple Music",
-          subCount: 0,
-          thumbnail: "",
-          authorThumbnails: [],
-        } as CardChannel);
+        const data: ItunesSearchResponse = await res.json();
+        const cards: Array<CardVideo | CardChannel> = [];
+
+        for (const item of data.results) {
+          if (item.wrapperType === "track") {
+            const t = item as ItunesTrack;
+            if (!t.trackId || !t.trackName) continue;
+            cards.push({
+              type: "video",
+              videoId: encodeAppleMusicVideoId(t.trackId, t.artistName ?? "", t.trackName),
+              title: `${t.trackName}${t.collectionName ? ` — ${t.collectionName}` : ""}`,
+              thumbnail: upgradeArtwork(t.artworkUrl100),
+              liveNow: false,
+              lengthSeconds: t.trackTimeMillis ? Math.floor(t.trackTimeMillis / 1000) : 0,
+              videoThumbnails: [],
+            } as CardVideo);
+          } else if (item.wrapperType === "artist") {
+            const a = item as ItunesArtist;
+            if (!a.artistId || !a.artistName) continue;
+            cards.push({
+              type: "channel",
+              author: a.artistName,
+              authorId: `${AM_ARTIST_PREFIX}${a.artistId}`,
+              authorVerified: false,
+              videoCount: 0,
+              description: a.primaryGenreName ?? "Artist on Apple Music",
+              subCount: 0,
+              thumbnail: "",
+              authorThumbnails: [],
+            } as CardChannel);
+          }
+        }
+
+        if (cards.length > 0) return cards;
+      } catch (inner) {
+        // Re-throw rate limit errors so the caller knows to fall back
+        if (inner instanceof Error && inner.message.includes("rate limited")) throw inner;
+        // Otherwise ignore and try next entity variant
       }
     }
-
-    return cards;
+    return [];
   } catch (err) {
     log.warn("searchAppleMusic failed", { query, err });
-    return [];
+    throw err; // propagate so search.ts can fall back to Invidious
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -181,7 +198,7 @@ export const getLatestRelease = async (
   itunesArtistId: string,
 ): Promise<LatestRelease | null> => {
   try {
-    const url = `https://itunes.apple.com/lookup?id=${itunesArtistId}&entity=album&limit=5&sort=recent`;
+    const url = `/api/itunes-proxy/lookup?id=${itunesArtistId}&entity=album&limit=5&sort=recent`;
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const data: ItunesLookupResponse = await res.json();

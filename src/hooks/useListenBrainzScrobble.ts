@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
-import { usePlayerState, usePlayerVideo } from "../providers/Player";
+import { usePlayerProgress, usePlayerStatus, usePlayerVideo } from "../providers/Player";
 import { useSettings } from "../providers/Settings";
 import {
-  parseArtistTrack,
   submitListen,
   submitPlayingNow,
 } from "../services/listenbrainz";
+import { extractArtistTrack } from "../services/lyrics";
 
 /**
  * Hook that handles automatic ListenBrainz scrobbling.
@@ -16,7 +16,8 @@ import {
 export function useListenBrainzScrobble() {
   const settings = useSettings();
   const { video } = usePlayerVideo();
-  const playerState = usePlayerState();
+  const playerState = usePlayerProgress();
+  const playerStatus = usePlayerStatus();
 
   // Track which video we've already scrobbled
   const scrobbledVideoId = useRef<string | null>(null);
@@ -48,7 +49,7 @@ export function useListenBrainzScrobble() {
     trackStartTimestamp.current = Math.floor(Date.now() / 1000);
 
     if (settings.listenBrainzPlayingNow !== false) {
-      const { artist, track } = parseArtistTrack(video.title ?? "", video.author ?? "");
+      const { artist, track } = extractArtistTrack(video.title ?? "", video.author ?? "");
       submitPlayingNow(credentials, {
         artist_name: artist,
         track_name: track,
@@ -65,7 +66,7 @@ export function useListenBrainzScrobble() {
     if (!video || !isEnabled || !credentials.userToken) return;
     if (scrobbledVideoId.current === video.videoId) return;
 
-    const duration = playerState.audioDuration;
+    const duration = playerStatus.audioDuration;
     const currentTime = playerState.currentTime;
 
     if (!duration || duration <= 0 || currentTime == null || currentTime < 0) return;
@@ -78,7 +79,7 @@ export function useListenBrainzScrobble() {
 
     if (currentTime >= threshold) {
       scrobbledVideoId.current = video.videoId;
-      const { artist, track } = parseArtistTrack(video.title ?? "", video.author ?? "");
+      const { artist, track } = extractArtistTrack(video.title ?? "", video.author ?? "");
       submitListen(
         credentials,
         {
@@ -98,7 +99,7 @@ export function useListenBrainzScrobble() {
     isEnabled,
     credentials,
     playerState.currentTime,
-    playerState.audioDuration,
+    playerStatus.audioDuration,
     settings.listenBrainzScrobblePercent,
     settings.listenBrainzScrobbleMaxSeconds,
   ]);

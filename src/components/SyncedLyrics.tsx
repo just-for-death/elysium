@@ -9,22 +9,22 @@ import {
 import { memo, useEffect, useRef } from "react";
 import { useQuery } from "react-query";
 
-import { usePlayerState, usePlayerVideo } from "../providers/Player";
+import { usePlayerProgress, usePlayerVideo } from "../providers/Player";
 import {
   getCurrentLineIndex,
   getLyrics,
+  extractArtistTrack,
   type LyricLine,
 } from "../services/lyrics";
-import { parseArtistTrack } from "../services/listenbrainz";
 
 export const SyncedLyrics = memo(() => {
   const { video } = usePlayerVideo();
-  const playerState = usePlayerState();
+  const playerState = usePlayerProgress();
   const activeLineRef = useRef<HTMLDivElement>(null);
 
-  // Parse artist/track from video title + author
+  // Parse artist/track from video title + author using multi-format extractor
   const { artist, track } = video
-    ? parseArtistTrack(video.title, video.author)
+    ? extractArtistTrack(video.title, video.author)
     : { artist: "", track: "" };
 
   const { data: lyrics, isLoading } = useQuery(
@@ -49,11 +49,14 @@ export const SyncedLyrics = memo(() => {
   const hasPlain = Boolean(lyrics?.plainLyrics);
   const currentIdx = hasSynced ? getCurrentLineIndex(lines, currentTime) : -1;
 
-  // Auto-scroll active line into view
+  // Auto-scroll active line into view.
+  // PERF FIX (iPad): Use "instant" not "smooth" — smooth scroll runs a JS
+  // animation that fires every 500ms alongside the listen interval, causing
+  // main-thread jank on WebKit that competes with audio buffering/decoding.
   useEffect(() => {
     if (activeLineRef.current) {
       activeLineRef.current.scrollIntoView({
-        behavior: "smooth",
+        behavior: "instant" as ScrollBehavior,
         block: "center",
       });
     }
@@ -102,7 +105,7 @@ export const SyncedLyrics = memo(() => {
           <Badge color="green" variant="light" size="xs">Synced Lyrics</Badge>
         </Box>
         <ScrollArea
-          style={{ height: "calc(100vh - 580px)", minHeight: 200 }}
+          style={{ height: "clamp(200px, calc(100vh - 580px), 480px)" }}
         >
           <Box px="md" py="lg" style={{ textAlign: "center" }}>
             {lines.map((line, i) => {
@@ -149,7 +152,7 @@ export const SyncedLyrics = memo(() => {
       <Box px="md" pt="xs" pb={4} style={{ textAlign: "center" }}>
         <Badge color="gray" variant="light" size="xs">Plain Lyrics</Badge>
       </Box>
-      <ScrollArea style={{ height: "calc(100vh - 580px)", minHeight: 200 }}>
+      <ScrollArea style={{ height: "clamp(200px, calc(100vh - 580px), 480px)" }}>
         <Box px="md" py="lg" style={{ textAlign: "center" }}>
           {(lyrics.plainLyrics ?? "").split("\n").map((line, i) => (
             <Text key={i} size="sm" c="dimmed" py={2} style={{ lineHeight: 1.6 }}>

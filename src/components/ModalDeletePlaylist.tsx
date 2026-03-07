@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { db } from "../database";
 import { getPlaylists } from "../database/utils";
+import { getMapping, deleteMapping } from "../utils/invidiousMappings";
 import { useSetPlaylists } from "../providers/Playlist";
 import { useSettings, useSetSettings } from "../providers/Settings";
 import { deleteInvidiousPlaylist } from "../services/invidiousAuth";
@@ -27,18 +28,15 @@ export const ModalDeletePlaylist: FC<ModalDeletePlaylistProps> = memo(
 
     const handleDeletePlaylist = async () => {
       // Remove Invidious mapping before deleting locally
-      const invId = playlist.ID ? settings.invidiousPlaylistMappings?.[playlist.ID] : undefined;
+      const invId = playlist.ID ? getMapping(playlist.ID) : undefined;
 
       db.deleteRows("playlists", { ID: playlist.ID });
       db.commit();
       setPlaylists(getPlaylists());
 
       // Clean up mapping entry
-      if (playlist.ID && settings.invidiousPlaylistMappings?.[playlist.ID]) {
-        const { [playlist.ID]: _removed, ...rest } = settings.invidiousPlaylistMappings;
-        setSettings((prev: any) => ({ ...prev, invidiousPlaylistMappings: rest }));
-        db.update("settings", { ID: 1 }, () => ({ invidiousPlaylistMappings: rest }));
-        db.commit();
+      if (playlist.ID && getMapping(playlist.ID)) {
+        deleteMapping(playlist.ID);
       }
 
       notifications.show({
