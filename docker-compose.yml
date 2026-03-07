@@ -1,41 +1,43 @@
-# ── Elysium — docker-compose (pre-built images from Docker Hub) ───────────────
+# ── Elysium v1.12.3 — Portainer Stack ────────────────────────────────────────
 #
-# Pulls images directly — no local build required.
-# Images: justxforxdocker/elysium, justxforxdocker/elysium-sync
+#  Paste this into Portainer → Stacks → Add Stack → Web editor
 #
-# Usage:
-#   docker compose up -d
-#   docker compose pull && docker compose up -d   ← update to latest
+#  Images: justxforxdocker/elysium   (PWA + REST server)
+#          justxforxdocker/elysium-sync  (WebSocket sync server)
 #
-# Logs:
-#   docker compose logs -f elysium
-#   docker compose logs -f sync-server
+#  Access: http://your-server-ip:7771
 #
+#  Update: pull new images then redeploy the stack
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
 
-  # ── Main app (PWA + REST) ─────────────────────────────────────────────────
+  # ── Main app ────────────────────────────────────────────────────────────────
   elysium:
     image: justxforxdocker/elysium:latest
     container_name: elysium
     restart: unless-stopped
     ports:
-      - "${PORT:-7771}:3000"
+      - "7771:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - SYNC_SERVER_URL=http://sync-server:3001
-      # ── Web Push / VAPID (optional) ───────────────────────────────────────
-      # Generate keys: docker run --rm node:20-alpine npx web-push generate-vapid-keys
+      - SYNC_SERVER_URL=http://elysium-sync:3001
+
+      # ── Push notifications (optional) ──────────────────────────────────────
+      # Generate keys with:
+      #   docker run --rm node:20-alpine npx web-push generate-vapid-keys
+      #
       # - VAPID_PUBLIC_KEY=your_public_key_here
       # - VAPID_PRIVATE_KEY=your_private_key_here
       # - VAPID_EMAIL=mailto:you@example.com
       # - BROADCAST_SECRET=change_me_to_a_long_random_secret
-      # ── HSTS (only if behind an HTTPS reverse proxy) ──────────────────────
+
+      # ── HTTPS / HSTS (only if behind a reverse proxy with SSL) ─────────────
       # - ENABLE_HSTS=true
+
     depends_on:
-      sync-server:
+      elysium-sync:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
@@ -56,21 +58,24 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "com.elysium.service=app"
+      - "com.elysium.version=1.12.3"
 
-  # ── Real-time sync server ─────────────────────────────────────────────────
-  sync-server:
+  # ── Real-time sync server ───────────────────────────────────────────────────
+  elysium-sync:
     image: justxforxdocker/elysium-sync:latest
     container_name: elysium-sync
     restart: unless-stopped
-    # Not exposed directly — all traffic proxied through elysium at /api/live/*
-    # Uncomment to debug directly:
+    # Sync server is NOT exposed directly — all traffic proxied via elysium
+    # at /api/live/*. Uncomment only for debugging:
     # ports:
     #   - "3001:3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - SYNC_TTL_MS=86400000   # 24h snapshot TTL
-      - LOG_LEVEL=${SYNC_LOG_LEVEL:-info}
+      - SYNC_TTL_MS=86400000     # 24h — how long device snapshots are kept
+      - LOG_LEVEL=info           # debug | info | warn | error
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 20s
@@ -90,6 +95,9 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    labels:
+      - "com.elysium.service=sync"
+      - "com.elysium.version=1.12.3"
 
 networks:
   elysium-net:
