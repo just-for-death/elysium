@@ -350,13 +350,28 @@ export const AutoQueueSettings = memo(() => {
                 Ollama — AI Engine
               </Text>
 
-              {isRemoteOrigin && (
-                <Alert icon={<IconInfoCircle size={16} />} color="yellow" variant="light">
-                  <Text size="xs">
-                    Set <code>OLLAMA_ORIGINS=*</code> on your Ollama host and use its LAN IP, not <code>localhost</code>.
-                  </Text>
-                </Alert>
-              )}
+              {isRemoteOrigin && (() => {
+                const isMixedContent =
+                  typeof window !== "undefined" &&
+                  window.location.protocol === "https:" &&
+                  ollamaUrl.startsWith("http:");
+                return isMixedContent ? (
+                  <Alert icon={<IconInfoCircle size={16} />} color="blue" variant="light">
+                    <Text size="xs">
+                      Your app is on <strong>HTTPS</strong> — the built-in proxy handles Ollama requests
+                      automatically, so mixed-content is not an issue. Just make sure your Ollama
+                      host is reachable from the server.
+                    </Text>
+                  </Alert>
+                ) : (
+                  <Alert icon={<IconInfoCircle size={16} />} color="yellow" variant="light">
+                    <Text size="xs">
+                      Set <code>OLLAMA_ORIGINS=*</code> on your Ollama host and use its LAN IP, not <code>localhost</code>.
+                      Requests are routed through the built-in server proxy — no browser CORS issues.
+                    </Text>
+                  </Alert>
+                );
+              })()}
 
               {/* ListenBrainz status — shows what data Ollama will receive */}
               {!hasLB ? (

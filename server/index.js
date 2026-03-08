@@ -357,6 +357,61 @@ app.post("/api/gotify-proxy", async (req, res) => {
   }
 });
 
+// ── API: Ollama proxy ──────────────────────────────────────────────────────────
+// Browser → this proxy → Ollama (server-to-server, no CORS/mixed-content issues)
+// Required when the app is served from a remote origin (not localhost):
+//   - Browser CORS blocks cross-origin fetch to Ollama (no Access-Control headers)
+//   - HTTPS app + HTTP Ollama = mixed-content block (Safari, Chrome)
+// Security: whitelisted paths only (not an open proxy), URL scheme validated.
+const OLLAMA_ALLOWED_PATHS = new Set(["/api/tags", "/api/generate", "/api/version"]);
+
+app.all("/api/ollama-proxy", async (req, res) => {
+  const targetUrl = req.headers["x-ollama-target"];
+  const ollamaPath = req.headers["x-ollama-path"];
+
+  // Validate target URL
+  if (typeof targetUrl !== "string" || !targetUrl) {
+    return res.status(400).json({ error: "Missing x-ollama-target header" });
+  }
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(targetUrl);
+  } catch {
+    return res.status(400).json({ error: "Invalid x-ollama-target URL" });
+  }
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    return res.status(400).json({ error: "x-ollama-target must use http or https" });
+  }
+
+  // Validate path (tight whitelist — not an open proxy)
+  if (typeof ollamaPath !== "string" || !OLLAMA_ALLOWED_PATHS.has(ollamaPath)) {
+    return res.status(400).json({ error: `x-ollama-path must be one of: ${[...OLLAMA_ALLOWED_PATHS].join(", ")}` });
+  }
+
+  const forwardUrl = `${targetUrl.replace(/\/$/, "")}${ollamaPath}`;
+
+  try {
+    const upstream = await fetch(forwardUrl, {
+      method:  req.method,
+      headers: {
+        "Content-Type": "application/json",
+        "Accept":        "application/json",
+      },
+      // Only forward body for POST requests
+      ...(req.method === "POST" ? { body: JSON.stringify(req.body) } : {}),
+      // 35s: slightly longer than the client's 30s AbortSignal so Express
+      // can return a clean JSON error rather than a hard socket drop
+      signal: AbortSignal.timeout(35_000),
+    });
+
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } catch (err) {
+    log.error("ollama:proxy", { url: forwardUrl, err: err.message });
+    res.status(502).json({ error: "Could not reach Ollama server", detail: err.message });
+  }
+});
+
 
 
 // ═══════════════════════════════════════════════════════════════════════════════

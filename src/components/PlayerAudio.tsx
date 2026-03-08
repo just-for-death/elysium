@@ -163,8 +163,14 @@ export const PlayerAudio = memo(() => {
 
   const retryCountRef = useRef(0);
   const MAX_RETRIES = 2;
+  // FIX: Guard against double-advance when iOS `ended` never fires.
+  // handleListen fires every 500ms; play() is async (200ms–2s).
+  // Without this ref, the next tick would call play() again before the
+  // new track loads, skipping an extra song.
+  const advancingToNextRef = useRef(false);
   useEffect(() => {
     retryCountRef.current = 0;
+    advancingToNextRef.current = false; // reset when a new track URL is set
     lastAudioDurationRef.current = null; // reset so new track re-syncs audioDuration
   }, [playerUrl]);
 
@@ -225,6 +231,21 @@ export const PlayerAudio = memo(() => {
     if (!audio) return;
 
     const apiDuration = playerVideo.video?.lengthSeconds ?? 0;
+
+    // ── FIX: iOS WebKit `ended` is unreliable for proxied/chunked streams ──
+    // If currentTime has reached or exceeded the API duration, advance now.
+    // This covers the case where the stream is slightly longer than metadata
+    // reports and the `ended` event never fires (common on iPad with Invidious).
+    // advancingToNextRef prevents the next 500ms tick from calling play() again
+    // before the new track URL is set (which resets the ref via useEffect).
+    if (apiDuration > 0 && currentTime >= apiDuration && !audio.loop) {
+      if (!advancingToNextRef.current && videosIds.nextVideoId) {
+        advancingToNextRef.current = true;
+        play(videosIds.nextVideoId, playlist.length ? playlist : null);
+      }
+      return; // don't update progress bar past the end
+    }
+
     const streamDuration = audio.duration;
     const duration = apiDuration > 0
       ? apiDuration

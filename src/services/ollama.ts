@@ -1,5 +1,36 @@
 import { log } from "../utils/logger";
 
+// ── Ollama fetch helper ────────────────────────────────────────────────────────
+// On remote origins (iPad, phone, any non-localhost access), direct fetch to
+// Ollama is blocked by the browser's CORS policy and mixed-content rules.
+// This helper routes all Ollama calls through the server-side proxy in those
+// cases — the Express server forwards server-to-server, bypassing both issues.
+const isRemoteOrigin =
+  typeof window !== "undefined" &&
+  window.location.hostname !== "localhost" &&
+  window.location.hostname !== "127.0.0.1";
+
+async function ollamaFetch(
+  ollamaUrl: string,
+  path: "/api/tags" | "/api/generate" | "/api/version",
+  init?: RequestInit,
+): Promise<Response> {
+  if (isRemoteOrigin) {
+    // Route through the Express proxy — same origin, no CORS/mixed-content issues
+    return fetch(`/api/ollama-proxy`, {
+      ...init,
+      method: init?.method ?? "GET",
+      headers: {
+        ...(init?.headers ?? {}),
+        "x-ollama-target": ollamaUrl,
+        "x-ollama-path": path,
+      },
+    });
+  }
+  // Localhost: call Ollama directly (no CORS restriction)
+  return fetch(`${ollamaUrl}${path}`, init);
+}
+
 export interface OllamaSuggestion {
   title: string;
   artist: string;
@@ -134,7 +165,7 @@ Respond ONLY with a JSON object — no markdown fences, no explanation:
   try {
     // Two attempts — first may hit Ollama cold-start (model loading on GTX 1650 can take 10-20s)
     for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${ollamaUrl}/api/generate`, {
+    const res = await ollamaFetch(ollamaUrl, "/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -200,7 +231,7 @@ export const testOllamaConnection = async (
   ollamaUrl: string,
 ): Promise<{ ok: boolean; models: string[] }> => {
   try {
-    const res = await fetch(`${ollamaUrl}/api/tags`, {
+    const res = await ollamaFetch(ollamaUrl, "/api/tags", {
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return { ok: false, models: [] };
@@ -244,7 +275,7 @@ Rules:
 Return ONLY a JSON object on a single line, nothing else:
 {"artist":"<real singer name>","track":"<song title only>"}`;
 
-    const res = await fetch(`${ollamaUrl}/api/generate`, {
+    const res = await ollamaFetch(ollamaUrl, "/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
