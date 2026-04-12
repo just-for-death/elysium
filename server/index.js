@@ -384,10 +384,29 @@ app.get("/api/lyrics-proxy/netease/lyric", async (req, res) => {
   }
 });
 
+// Helper to sidestep Node 18 native fetch/undici IPv6 resolution bugs
+const https = require('https');
+function safeFetchJson(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, { family: 4, headers: { "User-Agent": "Elysium/1.12" } }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 429) return reject(new Error("429"));
+        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
+        try { resolve(JSON.parse(data)); } catch(e) { reject(e); }
+      });
+    }).on('error', reject).setTimeout(8000, function() {
+        this.destroy(); reject(new Error("Timeout"));
+    });
+  });
+}
+
 // ── API: iTunes / Apple Music proxy ───────────────────────────────────────────
 // itunes.apple.com does not send CORS headers — all direct browser requests are
 // blocked. The server proxies requests and returns JSON with CORS headers.
 // Responses are cached 1 hour (artwork URLs are stable CDN links).
+
 
 app.get("/api/itunes-proxy/search", async (req, res) => {
   const { term, media, entity, limit, lang } = req.query;
@@ -399,16 +418,11 @@ app.get("/api/itunes-proxy/search", async (req, res) => {
     if (entity) params.set("entity", entity);
     if (limit)  params.set("limit",  limit);
     if (lang)   params.set("lang",   lang);
-    const upstream = await fetch(`https://itunes.apple.com/search?${params}`, {
-      headers: { "User-Agent": "Elysium/1.12" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (upstream.status === 429) return res.status(429).json({ error: "iTunes rate limited" });
-    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes error" });
-    const data = await upstream.json();
+    const data = await safeFetchJson(`https://itunes.apple.com/search?${params}`);
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.json(data);
   } catch (err) {
+    if (err.message === "429") return res.status(429).json({ error: "iTunes rate limited" });
     res.status(502).json({ error: "iTunes search proxy failed", detail: err.message });
   }
 });
@@ -422,12 +436,7 @@ app.get("/api/itunes-proxy/lookup", async (req, res) => {
     if (entity) params.set("entity", entity);
     if (limit)  params.set("limit",  limit);
     if (sort)   params.set("sort",   sort);
-    const upstream = await fetch(`https://itunes.apple.com/lookup?${params}`, {
-      headers: { "User-Agent": "Elysium/1.12" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes lookup error" });
-    const data = await upstream.json();
+    const data = await safeFetchJson(`https://itunes.apple.com/lookup?${params}`);
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.json(data);
   } catch (err) {
@@ -444,12 +453,7 @@ app.get("/api/itunes-proxy/rss/:cc/:chart", async (req, res) => {
   if (!allowed.includes(chart)) return res.status(400).json({ error: "Unknown chart type" });
   try {
     const url = `https://itunes.apple.com/${encodeURIComponent(cc)}/rss/${encodeURIComponent(chart)}/limit=${limit}/json`;
-    const upstream = await fetch(url, {
-      headers: { "User-Agent": "Elysium/1.12" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!upstream.ok) return res.status(upstream.status).json({ error: "iTunes RSS error" });
-    const data = await upstream.json();
+    const data = await safeFetchJson(url);
     res.setHeader("Cache-Control", "public, max-age=1800");
     res.json(data);
   } catch (err) {
