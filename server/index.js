@@ -191,6 +191,70 @@ app.get("/health", (_req, res) => {
 // ── Central Database API (Suwayomi Architecture) ───────────────────────────────
 
 const db = require("./db");
+const apiRouter = express.Router();
+
+apiRouter.get("/settings", (req, res) => res.json(db.getSettings()));
+apiRouter.put("/settings", (req, res) => res.json(db.updateSettings(req.body)));
+
+apiRouter.get("/history", (req, res) => res.json(db.getHistory()));
+apiRouter.post("/history", (req, res) => res.json(db.addHistory(req.body)));
+apiRouter.get("/history/:id", (req, res) => {
+  const item = db.getHistoryById(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/history/:id", (req, res) => {
+  const item = db.updateHistory(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/history/:id", (req, res) => { db.deleteHistory(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/history", (req, res) => { db.clearHistory(); res.json({ok:true}); });
+
+apiRouter.get("/playlists", (req, res) => res.json(db.getPlaylists()));
+apiRouter.post("/playlists", (req, res) => res.json(db.addPlaylist(req.body)));
+apiRouter.get("/playlists/:id", (req, res) => {
+  const item = db.getPlaylist(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/playlists/:id", (req, res) => res.json(db.updatePlaylist(req.params.id, req.body)));
+apiRouter.delete("/playlists/:id", (req, res) => { db.deletePlaylist(req.params.id); res.json({ok:true}); });
+
+apiRouter.get("/artists", (req, res) => res.json(db.getArtists()));
+apiRouter.post("/artists", (req, res) => res.json(db.addArtist(req.body)));
+apiRouter.get("/artists/:id", (req, res) => {
+  const item = db.getArtist(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/artists/:id", (req, res) => {
+  const item = db.updateArtist(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/artists/:id", (req, res) => { db.deleteArtist(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/artists", (req, res) => { db.clearArtists(); res.json({ok:true}); });
+
+apiRouter.get("/favorites", (req, res) => res.json(db.getFavorites()));
+apiRouter.post("/favorites", (req, res) => res.json(db.addFavorite(req.body)));
+apiRouter.delete("/favorites/:id", (req, res) => { db.deleteFavorite(req.params.id); res.json({ok:true}); });
+
+apiRouter.get("/albums", (req, res) => res.json(db.getAlbums()));
+apiRouter.post("/albums", (req, res) => res.json(db.addAlbum(req.body)));
+apiRouter.get("/albums/:id", (req, res) => {
+  const item = db.getAlbum(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/albums/:id", (req, res) => {
+  const item = db.updateAlbum(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/albums/:id", (req, res) => { db.deleteAlbum(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/albums", (req, res) => { db.clearAlbums(); res.json({ok:true}); });
+
 apiRouter.use("/recommendations", aiLimiter, require("./queue"));
 
 // ── Service Proxies (Protected) ───────────────────────────────────────────
@@ -325,87 +389,9 @@ apiRouter.get("/invidious/video/:id", async (req, res) => {
 
 // ListenBrainz
 apiRouter.get("/listenbrainz/playlists", async (req, res) => {
-  const { listenBrainzToken: token, listenBrainzUsername: user } = db.getSettingsRaw();
-  if (!token || !user) return res.status(400).json({ error: "ListenBrainz not configured" });
-  try {
-    const upstream = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(user)}/playlists`, { headers: { "Authorization": `Token ${token}` } });
-    const data = await upstream.json();
-    if (!upstream.ok) throw new Error(data.error || `HTTP ${upstream.status}`);
-    res.json(data.playlists || []);
-  } catch (err) { res.status(502).json({ error: "ListenBrainz failed", detail: err.message }); }
-});
-
-apiRouter.get("/listenbrainz/recommendations/cf/recording/for_user/:username", async (req, res) => {
-  const userToken = req.headers["x-lb-token"] || db.getSettingsRaw().listenBrainzToken;
-  if (!userToken) return res.status(400).json({ error: "ListenBrainz token required" });
-  try {
-    const upstream = await fetch(`https://api.listenbrainz.org/1/recommendations/cf/recording/for_user/${encodeURIComponent(req.params.username)}?${new URLSearchParams(req.query)}`, {
-      headers: { Authorization: `Token ${userToken}`, "User-Agent": "Elysium/1.12" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    res.setHeader("Cache-Control", "public, max-age=300").json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: "ListenBrainz recommendation failed", detail: err.message }); }
-});
-
-// Last.fm
-apiRouter.get("/lastfm/validate", async (req, res) => {
-  const apiKey = req.query.apiKey || db.getSettingsRaw().lastFmApiKey;
-  if (!apiKey) return res.status(400).json({ error: "Missing API key" });
-  try {
-    const data = await safeFetchJson(`http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key=${apiKey}&format=json&limit=1`);
-    if (data.error) throw new Error(data.message);
-    res.json({ ok: true, status: "Connected" });
-  } catch (err) { res.status(400).json({ error: "Last.fm validation failed", detail: err.message }); }
-});
-
-// Ollama Relay
-apiRouter.all("/ollama", async (req, res) => {
-  const targetUrl = req.headers["x-ollama-target"];
-  const ollamaPath = req.headers["x-ollama-path"];
-  if (!targetUrl || !ollamaPath || !OLLAMA_ALLOWED_PATHS.has(ollamaPath)) return res.status(400).json({ error: "Invalid Ollama request" });
-  try {
-    const parsed = new URL(targetUrl);
-    const allowLocal = process.env.ALLOW_LOCAL_NETWORK === "true";
-    const host = parsed.hostname.toLowerCase();
-    const isPrivate = host === "localhost" || host === "127.0.0.1" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/.test(host);
-    if (!allowLocal && isPrivate) return res.status(403).json({ error: "Local Ollama blocked (ALLOW_LOCAL_NETWORK=false)" });
-
-    const upstream = await fetch(`${targetUrl.replace(/\/$/, "")}${ollamaPath}`, {
-      method: req.method,
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      ...(req.method === "POST" ? { body: JSON.stringify(req.body) } : {}),
-      signal: AbortSignal.timeout(35000),
-    });
-    res.status(upstream.status).json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: "Ollama unreachable", detail: err.message }); }
-});
-
-// Gotify Relay
-apiRouter.post("/gotify", async (req, res) => {
-  if (!GOTIFY_SERVER_URL) return res.status(503).json({ error: "Gotify not configured" });
-  const { token, payload } = req.body || {};
-  if (!token || !payload) return res.status(400).json({ error: "Missing token/payload" });
-  try {
-    const upstream = await fetch(`${GOTIFY_SERVER_URL}/message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
-    });
-    res.status(upstream.status).send(await upstream.text());
-  } catch (err) { res.status(502).json({ error: "Gotify unreachable", detail: err.message }); }
-});
-
-app.use("/api/v1/library", requireApiKey, apiRouter);
-
-// ── API: ListenBrainz Playlists ────────────────────────────────────────────────
-app.get("/api/v1/listenbrainz/playlists", requireApiKey, async (req, res) => {
   const token = db.getSettingsRaw().listenBrainzToken;
   const user  = db.getSettingsRaw().listenBrainzUsername;
   if (!token || !user) return res.status(400).json({ error: "ListenBrainz not configured" });
-
   try {
     const upstream = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(user)}/playlists`, {
       headers: { "Authorization": `Token ${token}` }
@@ -418,7 +404,7 @@ app.get("/api/v1/listenbrainz/playlists", requireApiKey, async (req, res) => {
   }
 });
 
-app.post("/api/v1/listenbrainz/sync-playlist/:id", requireApiKey, async (req, res) => {
+apiRouter.post("/listenbrainz/sync-playlist/:id", async (req, res) => {
   const token = db.getSettingsRaw().listenBrainzToken;
   if (!token) return res.status(400).json({ error: "ListenBrainz token not configured" });
 
@@ -427,7 +413,6 @@ app.post("/api/v1/listenbrainz/sync-playlist/:id", requireApiKey, async (req, re
   if (!local) return res.status(404).json({ error: "Local playlist not found" });
 
   try {
-    // 1. Create Playlist (JSPF format)
     const createRes = await fetch("https://api.listenbrainz.org/1/playlist/create", {
       method: "POST",
       headers: { "Authorization": `Token ${token}`, "Content-Type": "application/json" },
@@ -443,24 +428,20 @@ app.post("/api/v1/listenbrainz/sync-playlist/:id", requireApiKey, async (req, re
         }
       })
     });
-
     const data = await createRes.json();
     if (!createRes.ok) throw new Error(data.error || `HTTP ${createRes.status}`);
-
     res.json({ ok: true, playlist_mbid: data.playlist_mbid });
   } catch (err) {
     res.status(502).json({ error: "ListenBrainz sync failed", detail: err.message });
   }
 });
 
-app.get("/api/v1/listenbrainz/playlist/:id", requireApiKey, async (req, res) => {
+apiRouter.get("/listenbrainz/playlist/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const upstream = await fetch(`https://api.listenbrainz.org/1/playlist/${id}`);
     const data = await upstream.json();
     if (!upstream.ok) throw new Error(data.error || `LB HTTP ${upstream.status}`);
-    
-    // Convert LB/JSPF to Elysium Playlist
     const playlist = {
       id: data.playlist.identifier || id,
       title: data.playlist.title || "LB Playlist",
@@ -477,13 +458,12 @@ app.get("/api/v1/listenbrainz/playlist/:id", requireApiKey, async (req, res) => 
   }
 });
 
-app.post("/api/v1/listenbrainz/import-playlist/:id", requireApiKey, async (req, res) => {
+apiRouter.post("/listenbrainz/import-playlist/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const upstream = await fetch(`https://api.listenbrainz.org/1/playlist/${id}`);
     const data = await upstream.json();
     if (!upstream.ok) throw new Error(data.error || `LB HTTP ${upstream.status}`);
-
     const title = data.playlist.title || "Imported LB Playlist";
     const tracks = (data.playlist.track || []).map(t => ({
       id: t.identifier?.split("v=")[1] || t.title,
@@ -491,27 +471,34 @@ app.post("/api/v1/listenbrainz/import-playlist/:id", requireApiKey, async (req, 
       title: t.title,
       artist: t.creator,
     }));
-
     const pl = db.createPlaylist(title);
-    for (const t of tracks) {
-      db.addTrackToPlaylist(pl.id, t);
-    }
-
+    for (const t of tracks) { db.addTrackToPlaylist(pl.id, t); }
     res.json({ ok: true, playlist: pl });
   } catch (err) {
     res.status(502).json({ error: "LB playlist import failed", detail: err.message });
   }
 });
 
-// ── API: Last.fm Validation ────────────────────────────────────────────────────
-app.get("/api/v1/lastfm/validate", requireApiKey, async (req, res) => {
+apiRouter.get("/listenbrainz/validate", async (req, res) => {
+  const token = req.query.token || db.getSettingsRaw().listenBrainzToken;
+  if (!token) return res.status(400).json({ error: "No token provided" });
+  try {
+    const upstream = await fetch("https://api.listenbrainz.org/1/validate-token", {
+      headers: { "Authorization": `Token ${token}` }
+    });
+    const data = await upstream.json();
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "Invalid token", detail: data.error });
+    res.json({ ok: true, valid: data.valid, username: data.user_name });
+  } catch (err) {
+    res.status(502).json({ error: "ListenBrainz validation failed", detail: err.message });
+  }
+});
+
+apiRouter.get("/lastfm/validate", async (req, res) => {
   const apiKey = req.query.apiKey || db.getSettingsRaw().lastFmApiKey;
   if (!apiKey) return res.status(400).json({ error: "No API key provided" });
-
   try {
-    // Just try a simple call that only needs the API key
-    const upstream = await fetch(`http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key=${apiKey}&format=json&limit=1`);
-    const data = await upstream.json();
+    const data = await safeFetchJson(`http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key=${apiKey}&format=json&limit=1`);
     if (data.error) throw new Error(data.message);
     res.json({ ok: true, status: "Connected" });
   } catch (err) {
@@ -519,81 +506,74 @@ app.get("/api/v1/lastfm/validate", requireApiKey, async (req, res) => {
   }
 });
 
-// ── API: ListenBrainz Validation ───────────────────────────────────────────────
-app.get("/api/v1/listenbrainz/validate", requireApiKey, async (req, res) => {
-  const token = req.query.token || db.getSettingsRaw().listenBrainzToken;
-  if (!token) return res.status(400).json({ error: "No token provided" });
-
-  try {
-    const upstream = await fetch("https://api.listenbrainz.org/1/validate-token", {
-      headers: { "Authorization": `Token ${token}` }
-    });
-    const data = await upstream.json();
-    if (!upstream.ok) {
-        return res.status(upstream.status).json({ error: "Invalid token", detail: data.error });
-    }
-    // Returns { valid: true, user_name: "..." }
-    res.json({ ok: true, valid: data.valid, username: data.user_name });
-  } catch (err) {
-    res.status(502).json({ error: "ListenBrainz validation failed", detail: err.message });
-  }
-});
-
-// ── API: ListenBrainz Scrobble Proxy ───────────────────────────────────────────
-app.post("/api/v1/scrobble", requireApiKey, async (req, res) => {
+apiRouter.post("/scrobble", async (req, res) => {
   const { track_metadata, tracks, listen_type = "single" } = req.body;
-  
-  if (listen_type === "single" && (!track_metadata || !track_metadata.artist_name || !track_metadata.track_name)) {
-    return res.status(400).json({ error: "Missing track_metadata for single scrobble" });
-  }
-  if (listen_type === "import" && (!Array.isArray(tracks) || tracks.length === 0)) {
-    return res.status(400).json({ error: "Missing tracks array for bulk import" });
-  }
-
   const settings = db.getSettingsRaw();
   const token = settings.listenBrainzToken;
   if (!token) return res.status(400).json({ error: "ListenBrainz token not configured" });
-
   try {
     let payload;
     if (listen_type === "single") {
-      payload = {
-        listen_type: "single",
-        payload: [{
-          listened_at: Math.floor(Date.now() / 1000),
-          track_metadata
-        }]
-      };
+      payload = { listen_type: "single", payload: [{ listened_at: Math.floor(Date.now() / 1000), track_metadata }] };
     } else {
-      // Bulk import
-      payload = {
-        listen_type: "import",
-        payload: tracks.map((t, index) => ({
-          // If bulk, space them out slightly or use provided timestamp
-          listened_at: Math.floor(Date.now() / 1000) - (tracks.length - index),
-          track_metadata: t
-        }))
-      };
+      payload = { listen_type: "import", payload: tracks.map((t, index) => ({ listened_at: Math.floor(Date.now() / 1000) - (tracks.length - index), track_metadata: t })) };
     }
-
     const upstream = await fetch("https://api.listenbrainz.org/1/submit-listens", {
       method: "POST",
-      headers: {
-        "Authorization": `Token ${token}`,
-        "Content-Type": "application/json"
-      },
+      headers: { "Authorization": `Token ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
-
-    if (!upstream.ok) {
-        const resp = await upstream.text();
-        return res.status(upstream.status).json({ error: "ListenBrainz error", detail: resp });
-    }
-    res.json({ ok: true, scrobbled: true, count: listen_type === "import" ? tracks.length : 1 });
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "ListenBrainz error", detail: await upstream.text() });
+    res.json({ ok: true, count: listen_type === "import" ? tracks.length : 1 });
   } catch (err) {
     res.status(502).json({ error: "ListenBrainz scrobbling failed", detail: err.message });
   }
 });
+
+// Ollama Relay
+const OLLAMA_ALLOWED_PATHS = new Set(["/api/generate", "/api/chat", "/api/tags", "/api/show"]);
+apiRouter.all("/ollama", async (req, res) => {
+  const targetUrl = req.headers["x-ollama-target"];
+  const ollamaPath = req.headers["x-ollama-path"];
+  if (!targetUrl || !ollamaPath || !OLLAMA_ALLOWED_PATHS.has(ollamaPath)) return res.status(400).json({ error: "Invalid Ollama request" });
+  try {
+    const parsed = new URL(targetUrl);
+    const allowLocal = process.env.ALLOW_LOCAL_NETWORK === "true";
+    const host = parsed.hostname.toLowerCase();
+    const isPrivate = host === "localhost" || host === "127.0.0.1" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/.test(host);
+    if (!allowLocal && isPrivate) return res.status(403).json({ error: "Local Ollama blocked" });
+    const upstream = await fetch(`${targetUrl.replace(/\/$/, "")}${ollamaPath}`, {
+      method: req.method,
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      ...(req.method === "POST" ? { body: JSON.stringify(req.body) } : {}),
+      signal: AbortSignal.timeout(35000),
+    });
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } catch (err) { res.status(502).json({ error: "Ollama unreachable", detail: err.message }); }
+});
+
+// Gotify Relay
+apiRouter.post("/gotify", async (req, res) => {
+  const GOTIFY_SERVER_URL = process.env.GOTIFY_SERVER_URL;
+  if (!GOTIFY_SERVER_URL) return res.status(503).json({ error: "Gotify not configured" });
+  const { token, payload } = req.body || {};
+  if (!token || !payload) return res.status(400).json({ error: "Missing token/payload" });
+  try {
+    const upstream = await fetch(`${GOTIFY_SERVER_URL}/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+    res.status(upstream.status).send(await upstream.text());
+  } catch (err) { res.status(502).json({ error: "Gotify unreachable", detail: err.message }); }
+});
+
+app.use("/api/v1/library", requireApiKey, apiRouter);
+
+// SPA fallback
+app.get("*", (_req, res) => res.sendFile(path.join(BUILD_DIR, "index.html")));
 
 // ── Proxy: /api/live/* → sync-server ─────────────────────────────────────────
 //
