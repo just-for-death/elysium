@@ -58,9 +58,10 @@ const log = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PORT       = Number(process.env.PORT) || 3001;
-const SYNC_TTL   = Number(process.env.SYNC_TTL_MS) || 24 * 60 * 60 * 1000;
-const PING_MS    = 25_000; // WebSocket keep-alive ping interval
+const PORT         = Number(process.env.PORT) || 3001;
+const SYNC_TTL     = Number(process.env.SYNC_TTL_MS) || 24 * 60 * 60 * 1000;
+const PING_MS      = 25_000; // WebSocket keep-alive ping interval
+const MAX_WS_CLIENTS = Number(process.env.MAX_WS_CLIENTS) || 500; // DoS guard
 
 // ── In-memory stores ──────────────────────────────────────────────────────────
 
@@ -224,15 +225,45 @@ function unregisterWs(code, ws) {
   log.debug("ws:unregister", { code, remaining: set.size });
 }
 
-// Periodic snapshot cleanup
+// Periodic snapshot and deletion cleanup
 setInterval(() => {
   const now = Date.now();
+  
   let removed = 0;
   for (const [code, entry] of snapshots.entries()) {
     if (entry.expiresAt < now) { snapshots.delete(code); removed++; }
   }
   if (removed > 0) log.info("snapshot:cleanup", { removed, remaining: snapshots.size });
+
+  // Cleanup abandoned pending deletions older than 30 days
+  const DELETION_TTL = 30 * 24 * 60 * 60 * 1000;
+  let removedDels = 0;
+  for (const [code, items] of pendingDeletions.entries()) {
+    const validItems = items.filter(item => (now - new Date(item.deletedAt).getTime()) < DELETION_TTL);
+    if (validItems.length !== items.length) {
+      if (validItems.length === 0) pendingDeletions.delete(code);
+      else pendingDeletions.set(code, validItems);
+      removedDels += (items.length - validItems.length);
+    }
+  }
+  if (removedDels > 0) {
+    persistDeletions();
+    log.info("deletions:cleanup", { removed: removedDels, remainingDevices: pendingDeletions.size });
+  }
 }, 15 * 60 * 1000).unref();
+
+// Presence TTL eviction — remove stale entries from devices that crashed without
+// sending an explicit presence:null (entries older than 10 minutes).
+const PRESENCE_TTL_MS = 10 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  let removed = 0;
+  for (const [code, state] of presence.entries()) {
+    const age = now - new Date(state.ts || 0).getTime();
+    if (age > PRESENCE_TTL_MS) { presence.delete(code); removed++; }
+  }
+  if (removed > 0) log.info("presence:eviction", { removed, remaining: presence.size });
+}, 5 * 60 * 1000).unref();
 
 // ── Express app ───────────────────────────────────────────────────────────────
 
@@ -283,10 +314,12 @@ app.post("/api/live/push", (req, res) => {
     expiresAt: Date.now() + SYNC_TTL,
   });
 
-  // Immediate delivery to all linked devices that are online
+  // Immediate delivery to paired linked devices that are online
   const targets = Array.isArray(linkedCodes) ? linkedCodes : [];
   let delivered = 0;
   for (const code of targets) {
+    // Only push to confirmed paired devices — skip unknown codes silently
+    if (!arePaired(deviceCode, code)) continue;
     const n = deliver(code, {
       type: "sync:data",
       fromCode: deviceCode,
@@ -342,6 +375,8 @@ app.post("/api/live/presence", (req, res) => {
   const targets = Array.isArray(linkedCodes) ? linkedCodes : [];
   let delivered = 0;
   for (const code of targets) {
+    // Only deliver to devices with a confirmed mutual pairing
+    if (!arePaired(deviceCode, code)) continue;
     delivered += deliver(code, {
       type: "presence:update",
       fromCode: deviceCode,
@@ -363,6 +398,12 @@ app.post("/api/live/control", (req, res) => {
   const { fromCode, targetCode, command } = req.body || {};
   if (!fromCode || !targetCode || !command) {
     return res.status(400).json({ error: "fromCode, targetCode and command required" });
+  }
+
+  // Security: only allow remote control between confirmed paired devices
+  if (!arePaired(fromCode, targetCode)) {
+    log.warn("remote:control:unpaired", { from: fromCode, to: targetCode, command });
+    return res.status(403).json({ error: "Devices are not paired" });
   }
 
   const delivered = deliver(targetCode, {
@@ -421,6 +462,14 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/api/live/ws" });
 
 wss.on("connection", (ws, req) => {
+  // Reject connections when at capacity
+  const totalConns = [...wsClients.values()].reduce((n, s) => n + s.size, 0);
+  if (totalConns >= MAX_WS_CLIENTS) {
+    log.warn("ws:capacity", { total: totalConns, max: MAX_WS_CLIENTS });
+    ws.close(1013, "Server at capacity");
+    return;
+  }
+
   // Expect first message to be { type: "register", deviceCode }
   let deviceCode = null;
   let pingTimer  = null;
@@ -540,6 +589,8 @@ wss.on("connection", (ws, req) => {
         const state = msg.presence ?? null;
         if (state) {
           presence.set(deviceCode, { ...state, ts: new Date().toISOString() });
+        } else {
+          presence.delete(deviceCode);
         }
         const targets = Array.isArray(msg.linkedCodes) ? msg.linkedCodes : [];
         // Only deliver to devices that have a confirmed mutual pairing
@@ -623,6 +674,11 @@ wss.on("connection", (ws, req) => {
         if (!deviceCode) return;
         const { targetCode, command } = msg;
         if (!targetCode || !command) return;
+        // Security: only allow remote control between confirmed paired devices
+        if (!arePaired(deviceCode, targetCode)) {
+          log.warn("ws:remote:unpaired", { from: deviceCode, to: targetCode, command });
+          return;
+        }
         const delivered = deliver(targetCode, {
           type: "remote:control",
           fromCode: deviceCode,
