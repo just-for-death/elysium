@@ -6,6 +6,8 @@ import { RouterProvider } from "./components/Router";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
 import "./translations";
 
+import { MantineProvider } from "./providers/Mantine";
+
 const rootEl = document.getElementById("root");
 if (!rootEl) throw new Error("Root element #root not found");
 
@@ -14,7 +16,9 @@ const root = ReactDOM.createRoot(rootEl);
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <RouterProvider />
+      <MantineProvider>
+        <RouterProvider />
+      </MantineProvider>
     </ErrorBoundary>
   </React.StrictMode>,
 );

@@ -21,7 +21,7 @@ import { FavoriteProvider } from "../providers/Favorite";
 import { FollowedArtistsProvider } from "../providers/FollowedArtists";
 import { FullscreenPlayerProvider } from "../providers/FullscreenPlayer";
 import { HistoryProvider } from "../providers/History";
-import { MantineProvider } from "../providers/Mantine";
+
 import { StableNavigateProvider } from "../providers/Navigate";
 import { PlayerProvider } from "../providers/Player";
 import { PlayerModeProvider } from "../providers/PlayerMode";
@@ -69,7 +69,6 @@ export const App = () => {
                                 <FullscreenPlayerProvider>
                                 <HistoryProvider>
                                   <PresenceProvider>
-                                  <MantineProvider>
                                     <Notifications />
                                     <AppShell>
                                       <SpotlightProvider />
@@ -90,7 +89,7 @@ export const App = () => {
                                         <AutoQueueHook />
                                       </Flex>
                                     </AppShell>
-                                  </MantineProvider>
+
                                   </PresenceProvider>
                                 </HistoryProvider>
                                 </FullscreenPlayerProvider>
