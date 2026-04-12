@@ -259,6 +259,26 @@ apiRouter.use("/recommendations", aiLimiter, require("./queue"));
 
 app.use("/api/v1/library", requireApiKey, apiRouter);
 
+// ── API: ListenBrainz Validation ───────────────────────────────────────────────
+app.get("/api/v1/listenbrainz/validate", requireApiKey, async (req, res) => {
+  const token = req.query.token || db.getSettingsRaw().listenBrainzToken;
+  if (!token) return res.status(400).json({ error: "No token provided" });
+
+  try {
+    const upstream = await fetch("https://api.listenbrainz.org/1/validate-token", {
+      headers: { "Authorization": `Token ${token}` }
+    });
+    const data = await upstream.json();
+    if (!upstream.ok) {
+        return res.status(upstream.status).json({ error: "Invalid token", detail: data.error });
+    }
+    // Returns { valid: true, user_name: "..." }
+    res.json({ ok: true, valid: data.valid, username: data.user_name });
+  } catch (err) {
+    res.status(502).json({ error: "ListenBrainz validation failed", detail: err.message });
+  }
+});
+
 // ── API: ListenBrainz Scrobble Proxy ───────────────────────────────────────────
 app.post("/api/v1/scrobble", requireApiKey, async (req, res) => {
   const { track_metadata } = req.body;
