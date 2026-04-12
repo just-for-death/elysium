@@ -21,6 +21,8 @@
 
 Elysium is a fully self-hosted YouTube music player built as a PWA (Progressive Web App). It uses [Invidious](https://github.com/iv-org/invidious) public instances as its backend — no Google account, no tracking, no ads. Install it on your phone or desktop and use it like a native app.
 
+> 📱 **Native Apps Available:** If you prefer native, we have completely rebuilt the mobile experience! Check out the [Elysium Mobile Client](https://github.com/just-for-death/elysium-client) (built in Flutter for iOS and Android).
+
 ---
 
 ## Features
