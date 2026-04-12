@@ -25,6 +25,10 @@ const express     = require("express");
 const compression = require("compression");
 const rateLimit   = require("express-rate-limit");
 const webpush     = require("web-push");
+const dns         = require("dns");
+
+// Fix IPv6 fetch timeouts in Docker environments
+dns.setDefaultResultOrder('ipv4first');
 
 
 
