@@ -33,9 +33,11 @@ const defaultData = {
     listenBrainzUsername: "",
     invidiousSid:         "",          // session cookie — never exposed via GET /settings
     invidiousUsername:    "",
+    lastFmApiKey:         "",
     queueMode:            "off",
     highQuality:          false,
     cacheEnabled:         true,
+    videoMode:            false,
   },
   history:   [],
   playlists: [],
@@ -103,15 +105,38 @@ function _scheduleFlush() {
   if (_flushTimer) return;
   _flushTimer = setTimeout(() => {
     _flushTimer = null;
-    if (!_dirty) return;
-    _dirty = false;
-    const snapshot = JSON.stringify(_cache, null, 2);
-    _ensureDataDir();
-    fs.writeFile(DB_PATH, snapshot, "utf8", (err) => {
-      if (err) console.error("[Database] Write error:", err.message);
-    });
+    flushSync();
   }, 200);
 }
+
+/** 
+ * Synchronously flushes the current cache to disk using an atomic rename pattern.
+ * Renaming is atomic on most filesystems, preventing file corruption on crash.
+ */
+function flushSync() {
+  if (!_dirty || !_cache) return;
+  _dirty = false;
+  
+  const tmpPath = DB_PATH + ".tmp";
+  try {
+    const snapshot = JSON.stringify(_cache, null, 2);
+    _ensureDataDir();
+    fs.writeFileSync(tmpPath, snapshot, "utf8");
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err) {
+    console.error("[Database] Flush error:", err.message);
+    // Cleanup tmp file if it exists
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+  }
+}
+
+// Ensure data is saved on process exit
+process.on("exit", () => {
+  if (_dirty) {
+    console.log("[Database] Process exit: Performing final sync...");
+    flushSync();
+  }
+});
 
 function _mutate(fn) {
   const db = getDb();
@@ -125,7 +150,8 @@ const SETTINGS_FIELDS = new Set([
   "ollamaEnabled", "ollamaUrl", "ollamaModel", "invidiousInstance",
   "listenBrainzToken", "listenBrainzUsername",
   "invidiousSid", "invidiousUsername",
-  "queueMode", "highQuality", "cacheEnabled",
+  "queueMode", "highQuality", "cacheEnabled", "videoMode",
+  "lastFmApiKey",
 ]);
 
 function filterSettings(updates) {
@@ -140,6 +166,7 @@ function filterSettings(updates) {
 function filterTrack(t) {
   if (!t || typeof t !== "object") return null;
   return {
+    id:        typeof t.id        === "string" ? t.id        : (typeof t.videoId === "string" ? t.videoId : undefined),
     videoId:   typeof t.videoId   === "string" ? t.videoId   : undefined,
     title:     typeof t.title     === "string" ? t.title     : "",
     artist:    typeof t.artist    === "string" ? t.artist    : "",

@@ -612,10 +612,20 @@ app.all("/api/ollama-proxy", async (req, res) => {
 
 /** Validate + normalise an Invidious instance URL. Throws on invalid input. */
 function parseInstanceUrl(raw) {
-  const base = (raw || "").replace(/\/+$/, "");
-  const u = new URL(base); // throws if invalid
+  const base = (raw || "").trim().replace(/\/+$/, "");
+  const u = new URL(base); 
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("Protocol must be http or https");
-  return base;
+  
+  // Security: Prevent SSRF by blocking local/private hostnames
+  const host = u.hostname.toLowerCase();
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0" || host === "[::1]";
+  const isPrivateIp = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/.test(host);
+  
+  if (isLocal || isPrivateIp) {
+    throw new Error("Local/Private instances are not allowed via this proxy for security reasons");
+  }
+
+  return u.origin;
 }
 
 /** Make an authenticated request to the Invidious API using a session SID. */
@@ -687,19 +697,34 @@ app.post("/api/invidious/login", async (req, res) => {
 // Headers: X-Invidious-Instance, X-Invidious-SID
 // Response: array of Invidious playlist objects
 app.get("/api/invidious/playlists", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
-  if (!base || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  const settings = db.getSettingsRaw();
+  const base = (req.headers["x-invidious-instance"] || settings.invidiousInstance || "").replace(/\/+$/, "");
+  const sid  = req.headers["x-invidious-sid"] || settings.invidiousSid || "";
+  
+  if (!base || !sid) {
+    return res.status(401).json({ error: "Invidious instance or session SID not configured" });
+  }
 
   try {
+    log.info("invidious:playlists:fetch", { base, sidLen: sid.length });
     const upstream = await invidiousApiCall(base, sid, "/api/v1/auth/playlists");
     const text = await upstream.text();
+
     if (!upstream.ok) {
       log.warn("invidious:playlists:error", { base, status: upstream.status, body: text.slice(0, 200) });
       return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
     }
-    res.setHeader("Content-Type", "application/json");
-    res.send(text);
+
+    try {
+      const data = JSON.parse(text);
+      // Handle both flat arrays and { playlists: [...] }
+      const playlists = Array.isArray(data) ? data : (data.playlists || []);
+      log.info("invidious:playlists:success", { base, count: playlists.length });
+      res.json(playlists);
+    } catch (e) {
+      log.error("invidious:playlists:parse-error", { base, err: e.message });
+      res.status(500).json({ error: "Failed to parse Invidious response" });
+    }
   } catch (err) {
     log.error("invidious:playlists", { err: err.message });
     res.status(502).json({ error: err.message });
@@ -783,7 +808,54 @@ app.get("/api/invidious/playlists/:id", async (req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.send(text);
   } catch (err) {
-    log.error("invidious:get-playlist", { err: err.message });
+    log.error("invidious:get-playlist", { err: err.message, id });
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── Sync Invidious Playlist to local DB ──
+app.post("/api/invidious/sync-playlist/:id", async (req, res) => {
+  const settings = db.getSettingsRaw();
+  const base = (req.headers["x-invidious-instance"] || settings.invidiousInstance || "").replace(/\/+$/, "");
+  const sid  = req.headers["x-invidious-sid"] || settings.invidiousSid || "";
+  const { id } = req.params;
+
+  if (!base || !sid) {
+    return res.status(401).json({ error: "Invidious instance or session SID not configured" });
+  }
+
+  try {
+    log.info("invidious:sync-playlist:start", { base, id });
+    const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}`);
+    if (!upstream.ok) {
+      const detail = await upstream.text();
+      log.warn("invidious:sync-playlist:error", { base, id, status: upstream.status, detail: detail.slice(0, 100) });
+      return res.status(upstream.status).json({ error: "Could not fetch Invidious playlist", detail });
+    }
+    
+    const data = await upstream.json();
+    log.info("invidious:sync-playlist:parsed", { id, title: data.title, trackCount: (data.videos || []).length });
+    const tracks = (data.videos || []).map(v => ({
+      id:      v.videoId,
+      videoId: v.videoId,
+      title:   v.title,
+      artist:  v.author,
+      artwork: v.videoThumbnails?.find(t => t.quality === "high")?.url || v.videoThumbnails?.[0]?.url,
+      duration: v.lengthSeconds,
+    }));
+
+    const playlists = db.getPlaylists();
+    const existing  = playlists.find(p => p.syncId === id);
+    
+    let result;
+    if (existing) {
+      result = db.updatePlaylist(existing.id, { title: data.title, videos: tracks });
+    } else {
+      result = db.addPlaylist({ title: data.title, videos: tracks, syncId: id });
+    }
+    res.json(result);
+  } catch (err) {
+    log.error("invidious:sync-playlist", { err: err.message });
     res.status(502).json({ error: err.message });
   }
 });
@@ -810,6 +882,53 @@ app.delete("/api/invidious/playlists/:id/videos/:vid", async (req, res) => {
   }
 });
 
+// ── GET /api/invidious/video/:id ──────────────────────────────────────────────
+// Resolves full video details and stream URLs for a specific YouTube ID.
+app.get("/api/invidious/video/:id", async (req, res) => {
+  const base = (req.headers["x-invidious-instance"] || "").trim().replace(/\/+$/, "");
+  const sid  = req.headers["x-invidious-sid"] || "";
+  if (!base) return res.status(400).json({ error: "X-Invidious-Instance header required" });
+
+  const settings = db.getSettingsRaw();
+  const allowedInstance = (settings.invidiousInstance || "").replace(/\/+$/, "");
+  
+  const publicWhitelist = new Set([
+     "https://yt.ikiagi.loseyourip.com",
+     "https://yewtu.be",
+     "https://vid.puffyan.us",
+     "https://invidious.snopyta.org",
+     "https://invidious.kavin.rocks",
+     "https://invidious.io",
+  ]);
+
+  const isAllowed = (allowedInstance && base === allowedInstance) || publicWhitelist.has(base);
+
+  if (!isAllowed) {
+    log.warn("invidious:video:ssrf-blocked", { requested: base, allowed: allowedInstance });
+    return res.status(403).json({ error: "X-Invidious-Instance is not allowed" });
+  }
+
+  try {
+    // Invidious API: /api/v1/videos/:id
+    // regional hints and local=true help bypass geo-locking and IP-locking.
+    const url = `/api/v1/videos/${req.params.id}?local=true`;
+    const upstream = await invidiousApiCall(base, sid, url);
+    const text = await upstream.text();
+    
+    if (!upstream.ok) {
+      log.warn("invidious:get-video:error", { base, id: req.params.id, status: upstream.status });
+      return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
+    }
+
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.send(text);
+  } catch (err) {
+    log.error("invidious:get-video", { err: err.message });
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ── DELETE /api/invidious/playlists/:id ───────────────────────────────────────
 app.delete("/api/invidious/playlists/:id", async (req, res) => {
   const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
@@ -832,15 +951,28 @@ app.delete("/api/invidious/playlists/:id", async (req, res) => {
 // Query params: instanceUrl (required), q, type, sort_by, page
 app.get("/api/invidious/search", async (req, res) => {
   const { instanceUrl, ...searchParams } = req.query;
+  const sid = req.headers["x-invidious-sid"]; // Forward SID if available
+  
   if (!instanceUrl) return res.status(400).json({ error: "instanceUrl query param required" });
 
-  // SSRF guard — only allow the instance the user has configured on the server
   const settings = db.getSettingsRaw();
   const allowedInstance = (settings.invidiousInstance || "").replace(/\/+$/, "");
   const normalised = (instanceUrl || "").replace(/\/+$/, "");
-  if (!allowedInstance || normalised !== allowedInstance) {
+  
+  const publicWhitelist = new Set([
+     "https://yt.ikiagi.loseyourip.com",
+     "https://yewtu.be",
+     "https://vid.puffyan.us",
+     "https://invidious.snopyta.org",
+     "https://invidious.kavin.rocks",
+     "https://invidious.io",
+  ]);
+
+  const isAllowed = (allowedInstance && normalised === allowedInstance) || publicWhitelist.has(normalised);
+
+  if (!isAllowed) {
     log.warn("invidious:search:ssrf-blocked", { requested: normalised, allowed: allowedInstance });
-    return res.status(403).json({ error: "instanceUrl does not match the configured Invidious instance" });
+    return res.status(403).json({ error: "instanceUrl is not in the whitelist and does not match configured instance" });
   }
 
   let base;
@@ -851,7 +983,10 @@ app.get("/api/invidious/search", async (req, res) => {
     const qs = new URLSearchParams(searchParams).toString();
     const url = `${base}/api/v1/search?${qs}`;
     const upstream = await fetch(url, {
-      headers: { "User-Agent": "Elysium/1.0" },
+      headers: { 
+        "User-Agent": "Elysium/1.0",
+        ...(sid ? { "Cookie": `SID=${sid}` } : {}),
+      },
       signal: AbortSignal.timeout(15_000),
     });
     const text = await upstream.text();
