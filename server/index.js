@@ -717,6 +717,10 @@ app.get("/api/invidious/playlists", async (req, res) => {
 
     try {
       const data = JSON.parse(text);
+      if (data && data.error) {
+        log.warn("invidious:playlists:api-error", { base, error: data.error });
+        return res.status(502).json({ error: "Invidious API error", detail: data.error });
+      }
       // Handle both flat arrays and { playlists: [...] }
       const playlists = Array.isArray(data) ? data : (data.playlists || []);
       log.info("invidious:playlists:success", { base, count: playlists.length });
