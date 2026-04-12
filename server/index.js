@@ -139,6 +139,14 @@ app.use(
 );
 
 app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-no-compression");
+  
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   res.setHeader("X-Frame-Options",        "SAMEORIGIN");
   res.setHeader("X-XSS-Protection",       "1; mode=block");
   res.setHeader("X-Content-Type-Options", "nosniff");
