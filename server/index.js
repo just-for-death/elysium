@@ -150,7 +150,24 @@ app.use((req, res, next) => {
   next();
 });
 
-// Static assets removed — Elysium is purely an API/Sync proxy server now.
+// ── Static assets ──────────────────────────────────────────────────────────────
+
+app.use(
+  express.static(BUILD_DIR, {
+    index: false,
+    setHeaders(res, filePath) {
+      const name = path.basename(filePath);
+      if (name === "service-worker.js" || name === "service-worker.js.map") {
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma",        "no-cache");
+      } else if (name.match(/\.[0-9a-f]{8,}\.(js|css|png|jpg|webp|svg|woff2?)$/)) {
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      } else if (name.match(/\.(png|ico|svg|webmanifest|json)$/)) {
+        res.setHeader("Cache-Control", "public, max-age=86400");
+      }
+    },
+  })
+);
 
 
 // ── Health ─────────────────────────────────────────────────────────────────────
@@ -950,7 +967,33 @@ app.post("/push/broadcast", async (req, res) => {
   res.json({ sent, failed, total: subscriptions.size });
 });
 
+// ── SPA catch-all ──────────────────────────────────────────────────────────────
+
+const staticAssetPattern = /\.(map|js|css|woff2?|ico|png|jpg|jpeg|gif|webp|svg|json)$/i;
+app.get("*", (req, res) => {
+  if (staticAssetPattern.test(req.path)) {
+    if (req.path.endsWith(".map")) {
+      res.setHeader("Content-Type", "application/json");
+      return res.send('{"version":3,"sources":[],"names":[],"mappings":""}');
+    }
+    return res.status(404).send("Not found");
+  }
+  const indexPath = path.join(BUILD_DIR, "index.html");
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      log.error("spa:sendFile", { err: err.message, path: indexPath });
+      res.status(503).send("Service unavailable – build artefacts not found.");
+    }
+  });
+});
+
 // ── HTTP server + WebSocket upgrade proxy ──────────────────────────────────────
+
+const indexPath = path.join(BUILD_DIR, "index.html");
+if (!fs.existsSync(indexPath)) {
+  log.warn("start:missing-build", { dir: BUILD_DIR, msg: "Frontend not found. API is running, but UI will return 503." });
+}
 
 const server = http.createServer(app);
 

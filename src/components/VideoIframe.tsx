@@ -33,6 +33,10 @@ export const VideoIframe = memo(() => {
     if (!video) return "";
     const url = new URL(`${base}/embed/${video.videoId}`);
     url.searchParams.set("autoplay", "1");
+    url.searchParams.set("controls", "0");
+    url.searchParams.set("disablekb", "1");
+    url.searchParams.set("modestbranding", "1");
+    url.searchParams.set("iv_load_policy", "3");
     if (start > 0) url.searchParams.set("start", String(start));
     url.searchParams.set("local", "true");
     return url.toString();
@@ -44,6 +48,10 @@ export const VideoIframe = memo(() => {
     const url = new URL(`https://www.youtube-nocookie.com/embed/${video.videoId}`);
     url.searchParams.set("autoplay", "1");
     url.searchParams.set("rel", "0");
+    url.searchParams.set("controls", "0");
+    url.searchParams.set("disablekb", "1");
+    url.searchParams.set("modestbranding", "1");
+    url.searchParams.set("iv_load_policy", "3");
     if (start > 0) url.searchParams.set("start", String(start));
     return url.toString();
   }, [start, video?.videoId]);

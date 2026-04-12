@@ -42,6 +42,8 @@ COPY --from=builder /app/build ./build
 
 # Copy server code
 COPY server/index.js ./server/index.js
+COPY server/db.js ./server/db.js
+COPY server/queue.js ./server/queue.js
 
 # Fix permissions so elysium user can read build files (avoids black screen)
 RUN chown -R elysium:elysium /app
