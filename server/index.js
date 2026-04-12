@@ -18,12 +18,15 @@
 
 "use strict";
 
-const path    = require("path");
-const fs      = require("fs");
-const http    = require("http");
-const express = require("express");
+const path        = require("path");
+const fs          = require("fs");
+const http        = require("http");
+const express     = require("express");
 const compression = require("compression");
-const webpush = require("web-push");
+const rateLimit   = require("express-rate-limit");
+const webpush     = require("web-push");
+
+
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 
@@ -82,6 +85,48 @@ app.use((req, _res, next) => {
   next();
 });
 
+// ── Rate Limiting ─────────────────────────────────────────────────────────────
+
+// Standard limit for proxy/API endpoints
+const defaultLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests — slow down" },
+});
+
+// Tight limit for the expensive AI queue endpoint (calls Ollama + 2× Invidious)
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "AI queue rate limit exceeded — wait 1 minute" },
+});
+
+// Apply rate limiting to all API and push routes (two calls — more reliable than array form)
+app.use("/api", defaultLimiter);
+app.use("/push", defaultLimiter);
+
+// ── Optional API Authentication ───────────────────────────────────────────────
+//
+// Set API_SECRET env var to require `Authorization: Bearer <secret>` on all
+// /api/v1/library/* and /api/v1/scrobble requests.
+// Leave unset for open (LAN-only) deployments.
+
+const API_SECRET = process.env.API_SECRET || "";
+
+function requireApiKey(req, res, next) {
+  if (!API_SECRET) return next(); // not configured — allow all
+  const auth = req.headers["authorization"] || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (token !== API_SECRET) {
+    return res.status(401).json({ error: "Unauthorized — API_SECRET required" });
+  }
+  next();
+}
+
 app.use(
   compression({
     level: 6,
@@ -105,29 +150,123 @@ app.use((req, res, next) => {
   next();
 });
 
-// ── Static assets ──────────────────────────────────────────────────────────────
+// Static assets removed — Elysium is purely an API/Sync proxy server now.
 
-app.use(
-  express.static(BUILD_DIR, {
-    index: false,
-    setHeaders(res, filePath) {
-      const name = path.basename(filePath);
-      if (name === "service-worker.js" || name === "service-worker.js.map") {
-        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-        res.setHeader("Pragma",        "no-cache");
-      } else if (name.match(/\.[0-9a-f]{8,}\.(js|css|png|jpg|webp|svg|woff2?)$/)) {
-        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      } else if (name.match(/\.(png|ico|svg|webmanifest|json)$/)) {
-        res.setHeader("Cache-Control", "public, max-age=86400");
-      }
-    },
-  })
-);
 
 // ── Health ─────────────────────────────────────────────────────────────────────
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime(), push: pushEnabled });
+});
+
+// ── Central Database API (Suwayomi Architecture) ───────────────────────────────
+
+const db = require("./db");
+const apiRouter = express.Router();
+
+apiRouter.get("/settings", (req, res) => res.json(db.getSettings()));
+apiRouter.put("/settings", (req, res) => res.json(db.updateSettings(req.body)));
+
+apiRouter.get("/history", (req, res) => res.json(db.getHistory()));
+apiRouter.post("/history", (req, res) => res.json(db.addHistory(req.body)));
+apiRouter.get("/history/:id", (req, res) => {
+  const item = db.getHistoryById(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/history/:id", (req, res) => {
+  const item = db.updateHistory(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/history/:id", (req, res) => { db.deleteHistory(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/history", (req, res) => { db.clearHistory(); res.json({ok:true}); });
+
+apiRouter.get("/playlists", (req, res) => res.json(db.getPlaylists()));
+apiRouter.post("/playlists", (req, res) => res.json(db.addPlaylist(req.body)));
+apiRouter.get("/playlists/:id", (req, res) => {
+  const item = db.getPlaylist(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/playlists/:id", (req, res) => res.json(db.updatePlaylist(req.params.id, req.body)));
+apiRouter.delete("/playlists/:id", (req, res) => { db.deletePlaylist(req.params.id); res.json({ok:true}); });
+
+apiRouter.get("/artists", (req, res) => res.json(db.getArtists()));
+apiRouter.post("/artists", (req, res) => res.json(db.addArtist(req.body)));
+apiRouter.get("/artists/:id", (req, res) => {
+  const item = db.getArtist(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/artists/:id", (req, res) => {
+  const item = db.updateArtist(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/artists/:id", (req, res) => { db.deleteArtist(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/artists", (req, res) => { db.clearArtists(); res.json({ok:true}); });
+
+apiRouter.get("/favorites", (req, res) => res.json(db.getFavorites()));
+apiRouter.post("/favorites", (req, res) => res.json(db.addFavorite(req.body)));
+apiRouter.delete("/favorites/:id", (req, res) => { db.deleteFavorite(req.params.id); res.json({ok:true}); });
+
+apiRouter.get("/albums", (req, res) => res.json(db.getAlbums()));
+apiRouter.post("/albums", (req, res) => res.json(db.addAlbum(req.body)));
+apiRouter.get("/albums/:id", (req, res) => {
+  const item = db.getAlbum(req.params.id);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.put("/albums/:id", (req, res) => {
+  const item = db.updateAlbum(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
+apiRouter.delete("/albums/:id", (req, res) => { db.deleteAlbum(req.params.id); res.json({ok:true}); });
+apiRouter.delete("/albums", (req, res) => { db.clearAlbums(); res.json({ok:true}); });
+
+apiRouter.use("/recommendations", aiLimiter, require("./queue"));
+
+app.use("/api/v1/library", requireApiKey, apiRouter);
+
+// ── API: ListenBrainz Scrobble Proxy ───────────────────────────────────────────
+app.post("/api/v1/scrobble", requireApiKey, async (req, res) => {
+  const { track_metadata } = req.body;
+  if (!track_metadata || !track_metadata.artist_name || !track_metadata.track_name) {
+    return res.status(400).json({ error: "Missing track_metadata with artist_name and track_name" });
+  }
+
+  const settings = db.getSettingsRaw(); // need the raw (unredacted) settings for the token
+  const token = settings.listenBrainzToken;
+  if (!token) return res.status(400).json({ error: "ListenBrainz token not configured in settings" });
+
+  try {
+    const payload = {
+      listen_type: "single",
+      payload: [{
+        listened_at: Math.floor(Date.now() / 1000),
+        track_metadata
+      }]
+    };
+
+    const upstream = await fetch("https://api.listenbrainz.org/1/submit-listens", {
+      method: "POST",
+      headers: {
+        "Authorization": `Token ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!upstream.ok) {
+        const resp = await upstream.text();
+        return res.status(upstream.status).json({ error: "ListenBrainz error", detail: resp });
+    }
+    res.json({ ok: true, scrobbled: true });
+  } catch (err) {
+    res.status(502).json({ error: "ListenBrainz scrobbling failed", detail: err.message });
+  }
 });
 
 // ── Proxy: /api/live/* → sync-server ─────────────────────────────────────────
@@ -330,17 +469,24 @@ app.get("/api/clearRemotePlay", (_req, res) => res.status(204).end());
 
 // ── API: Gotify proxy ──────────────────────────────────────────────────────────
 
-app.post("/api/gotify-proxy", async (req, res) => {
-  const { serverUrl, token, payload } = req.body || {};
-  if (!serverUrl || !token || !payload) {
-    return res.status(400).json({ error: "serverUrl, token and payload are required" });
+// SSRF mitigation: Gotify server URL is pulled from server-side env, not from the request body.
+// Set GOTIFY_SERVER_URL in the environment.  If unset, the proxy is disabled.
+const GOTIFY_SERVER_URL = (process.env.GOTIFY_SERVER_URL || "").replace(/\/+$/, "");
+
+app.post("/api/gotify-proxy", requireApiKey, async (req, res) => {
+  if (!GOTIFY_SERVER_URL) {
+    return res.status(503).json({ error: "Gotify proxy is not configured on this server (GOTIFY_SERVER_URL not set)" });
+  }
+  const { token, payload } = req.body || {};
+  if (!token || !payload) {
+    return res.status(400).json({ error: "token and payload are required" });
   }
   let target;
   try {
-    target = new URL(serverUrl.replace(/\/+$/, "") + "/message");
+    target = new URL(GOTIFY_SERVER_URL + "/message");
     if (target.protocol !== "http:" && target.protocol !== "https:") throw new Error("Invalid protocol");
   } catch {
-    return res.status(400).json({ error: "Invalid serverUrl" });
+    return res.status(500).json({ error: "GOTIFY_SERVER_URL is misconfigured on the server" });
   }
   try {
     const upstream = await fetch(target.toString(), {
@@ -648,10 +794,21 @@ app.delete("/api/invidious/playlists/:id", async (req, res) => {
 
 // ── GET /api/invidious/search ─────────────────────────────────────────────────
 // Proxies a search query to an Invidious instance, bypassing browser CORS.
+// SSRF mitigation: instanceUrl must exactly match one of the user's configured
+// instances stored in the server-side settings database.  Arbitrary URLs are rejected.
 // Query params: instanceUrl (required), q, type, sort_by, page
 app.get("/api/invidious/search", async (req, res) => {
   const { instanceUrl, ...searchParams } = req.query;
   if (!instanceUrl) return res.status(400).json({ error: "instanceUrl query param required" });
+
+  // SSRF guard — only allow the instance the user has configured on the server
+  const settings = db.getSettingsRaw();
+  const allowedInstance = (settings.invidiousInstance || "").replace(/\/+$/, "");
+  const normalised = (instanceUrl || "").replace(/\/+$/, "");
+  if (!allowedInstance || normalised !== allowedInstance) {
+    log.warn("invidious:search:ssrf-blocked", { requested: normalised, allowed: allowedInstance });
+    return res.status(403).json({ error: "instanceUrl does not match the configured Invidious instance" });
+  }
 
   let base;
   try { base = parseInstanceUrl(instanceUrl); }
@@ -703,10 +860,13 @@ setInterval(() => {
 
 const generateSyncCode = () => String(Math.floor(100000 + Math.random() * 900000));
 
+const SYNC_STORE_MAX = 10_000; // DoS guard
+
 app.post("/api/sync/push", (req, res) => {
   const payload = req.body;
   if (!payload || typeof payload !== "object") return res.status(400).json({ error: "Invalid payload" });
   if (JSON.stringify(payload).length > 5 * 1024 * 1024) return res.status(413).json({ error: "Payload too large" });
+  if (syncStore.size >= SYNC_STORE_MAX) return res.status(503).json({ error: "Sync store full — try again later" });
   let code, attempts = 0;
   do { code = generateSyncCode(); attempts++; } while (syncStore.has(code) && attempts < 20);
   syncStore.set(code, { payload, expiresAt: Date.now() + SYNC_TTL_MS });
@@ -790,34 +950,7 @@ app.post("/push/broadcast", async (req, res) => {
   res.json({ sent, failed, total: subscriptions.size });
 });
 
-// ── SPA catch-all ──────────────────────────────────────────────────────────────
-
-const staticAssetPattern = /\.(map|js|css|woff2?|ico|png|jpg|jpeg|gif|webp|svg|json)$/i;
-app.get("*", (req, res) => {
-  if (staticAssetPattern.test(req.path)) {
-    if (req.path.endsWith(".map")) {
-      res.setHeader("Content-Type", "application/json");
-      return res.send('{"version":3,"sources":[],"names":[],"mappings":""}');
-    }
-    return res.status(404).send("Not found");
-  }
-  const indexPath = path.join(BUILD_DIR, "index.html");
-  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
-  res.sendFile(indexPath, (err) => {
-    if (err) {
-      log.error("spa:sendFile", { err: err.message });
-      res.status(503).send("Service unavailable – build artefacts not found.");
-    }
-  });
-});
-
 // ── HTTP server + WebSocket upgrade proxy ──────────────────────────────────────
-
-const indexPath = path.join(BUILD_DIR, "index.html");
-if (!fs.existsSync(indexPath)) {
-  log.error("start:missing-build", { dir: BUILD_DIR });
-  process.exit(1);
-}
 
 const server = http.createServer(app);
 
@@ -885,4 +1018,7 @@ process.on("SIGINT",  () => shutdown("SIGINT"));
 process.on("uncaughtException", (err) => {
   log.error("uncaughtException", { err: err.message, stack: err.stack });
   process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  log.error("unhandledRejection", { reason: String(reason) });
 });

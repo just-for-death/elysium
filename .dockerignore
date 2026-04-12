@@ -1,0 +1,52 @@
+# Build artifacts
+build/
+.build/
+
+# Dependencies (will be installed inside Docker)
+node_modules/
+server/node_modules/
+sync-server/node_modules/
+
+# Dev/test files
+e2e/
+*.spec.ts
+playwright-report/
+test-results/
+
+# Git
+.git/
+.gitignore
+.github/
+
+# Local env files — pass via docker-compose environment: instead
+.env
+.env.local
+.env.development
+.env.test
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Root lockfile is excluded from the build context — Docker builder only needs
+# the server/ lockfile (server/package-lock.json) for reproducible npm ci.
+package-lock.json
+
+# Mobile app is not built inside Docker
+elysium-mobile/
+
+# Archive files should never be in the repo
+*.zip
+*.tar.gz
