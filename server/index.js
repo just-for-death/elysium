@@ -34,27 +34,8 @@ dns.setDefaultResultOrder('ipv4first');
 
 // ── Structured logger ─────────────────────────────────────────────────────────
 
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const LOG_LEVEL_NAME = (process.env.LOG_LEVEL || "info").toLowerCase();
-const LOG_LEVEL = LEVELS[LOG_LEVEL_NAME] ?? LEVELS.info;
-
-const log = {
-  _emit(level, msg, extra = {}) {
-    if (LEVELS[level] < LOG_LEVEL) return;
-    const line = JSON.stringify({
-      ts:    new Date().toISOString(),
-      level: level.toUpperCase(),
-      svc:   "elysium",
-      msg,
-      ...extra,
-    });
-    (level === "error" || level === "warn" ? process.stderr : process.stdout).write(line + "\n");
-  },
-  debug: (msg, extra) => log._emit("debug", msg, extra),
-  info:  (msg, extra) => log._emit("info",  msg, extra),
-  warn:  (msg, extra) => log._emit("warn",  msg, extra),
-  error: (msg, extra) => log._emit("error", msg, extra),
-};
+const { createLogger } = require("./logger");
+const log = createLogger("elysium");
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -67,6 +48,9 @@ const VAPID_PUBLIC     = process.env.VAPID_PUBLIC_KEY  || "";
 const VAPID_PRIVATE    = process.env.VAPID_PRIVATE_KEY || "";
 const VAPID_EMAIL      = process.env.VAPID_EMAIL       || "mailto:elysium@example.com";
 const BROADCAST_SECRET = process.env.BROADCAST_SECRET  || "";
+
+// CORS configuration: comma-separated list of allowed origins, or "*" for all
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*").split(",").map(s => s.trim());
 
 // ── Web Push ──────────────────────────────────────────────────────────────────
 
@@ -143,10 +127,14 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // Dynamic CORS: respect ALLOWED_ORIGINS env var (comma-separated, or "*" for all)
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.includes("*") || (origin && ALLOWED_ORIGINS.includes(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-no-compression");
-  
+
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
@@ -296,9 +284,9 @@ apiRouter.get("/netease/search", async (req, res) => {
   const { s, limit } = req.query;
   if (!s) return res.status(400).json({ error: "Missing query" });
   try {
-    const upstream = await fetch(`https://music.163.com/api/search/get?s=${encodeURIComponent(s)}&type=1&limit=${limit || 5}`, {
+    const upstream = await safeRequest(`https://music.163.com/api/search/get?s=${encodeURIComponent(s)}&type=1&limit=${limit || 5}`, {
       headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
-      signal: AbortSignal.timeout(10000),
+      timeout: 10000,
     });
     if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
     res.setHeader("Cache-Control", "public, max-age=3600").json(await upstream.json());
@@ -309,83 +297,18 @@ apiRouter.get("/netease/lyric", async (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: "Missing id" });
   try {
-    const upstream = await fetch(`https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`, {
+    const upstream = await safeRequest(`https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`, {
       headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
-      signal: AbortSignal.timeout(10000),
+      timeout: 10000,
     });
     if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
     res.setHeader("Cache-Control", "public, max-age=3600").json(await upstream.json());
   } catch (err) { res.status(502).json({ error: "NetEase lyrics failed", detail: err.message }); }
 });
 
-// Invidious
-apiRouter.post("/invidious/login", async (req, res) => {
-  const { instanceUrl, username, password } = req.body || {};
-  if (!instanceUrl || !username || !password) return res.status(400).json({ error: "Missing credentials" });
-  try {
-    const base = parseInstanceUrl(instanceUrl);
-    const loginRes = await fetch(`${base}/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Elysium/1.0" },
-      body: new URLSearchParams({ email: username, password, action: "signin" }).toString(),
-      redirect: "manual",
-      signal: AbortSignal.timeout(15000),
-    });
-    let cookieStr = loginRes.headers.get("set-cookie") || "";
-    if (typeof loginRes.headers.getSetCookie === "function") cookieStr = loginRes.headers.getSetCookie().join("; ");
-    const m = cookieStr.match(/(?:^|[;,]\s*)SID=([^;,\s]+)/i);
-    if (!m) return res.status(401).json({ error: "Login failed" });
-    res.json({ ok: true, sid: m[1].trim(), username, instanceUrl: base });
-  } catch (err) { res.status(502).json({ error: "Invidious unreachable", detail: err.message }); }
-});
-
-apiRouter.get("/invidious/playlists", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
-  if (!base || !sid) return res.status(401).json({ error: "Missing Invidious SID/Instance" });
-  try {
-    const upstream = await invidiousApiCall(base, sid, "/api/v1/auth/playlists");
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    res.json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: err.message }); }
-});
-
-apiRouter.get("/invidious/playlists/:id", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
-  if (!base || !sid) return res.status(401).json({ error: "Missing Invidious SID/Instance" });
-  try {
-    const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${req.params.id}`);
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    res.json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: err.message }); }
-});
-
-apiRouter.get("/invidious/search", async (req, res) => {
-  const { instanceUrl, ...params } = req.query;
-  const sid = req.headers["x-invidious-sid"];
-  if (!instanceUrl) return res.status(400).json({ error: "Missing instanceUrl" });
-  try {
-    const base = parseInstanceUrl(instanceUrl);
-    const upstream = await fetch(`${base}/api/v1/search?${new URLSearchParams(params)}`, {
-      headers: { "User-Agent": "Elysium/1.0", ...(sid ? { "Cookie": `SID=${sid}` } : {}) },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    res.json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: err.message }); }
-});
-
-apiRouter.get("/invidious/video/:id", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").trim().replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
-  if (!base) return res.status(400).json({ error: "Missing instance" });
-  try {
-    const upstream = await invidiousApiCall(base, sid, `/api/v1/videos/${req.params.id}?local=true`);
-    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
-    res.setHeader("Cache-Control", "public, max-age=3600").json(await upstream.json());
-  } catch (err) { res.status(502).json({ error: err.message }); }
-});
+// ── Invidious proxy endpoints ──────────────────────────────────────────────
+// All Invidious API calls are handled by direct app routes (defined later).
+// Router-based Invidious endpoints were removed to avoid duplicate definitions.
 
 // ListenBrainz
 apiRouter.get("/listenbrainz/playlists", async (req, res) => {
@@ -393,11 +316,11 @@ apiRouter.get("/listenbrainz/playlists", async (req, res) => {
   const user  = db.getSettingsRaw().listenBrainzUsername;
   if (!token || !user) return res.status(400).json({ error: "ListenBrainz not configured" });
   try {
-    const upstream = await fetch(`https://api.listenbrainz.org/1/user/${encodeURIComponent(user)}/playlists`, {
+    const upstream = await safeRequest(`https://api.listenbrainz.org/1/user/${encodeURIComponent(user)}/playlists`, {
       headers: { "Authorization": `Token ${token}` }
     });
     const data = await upstream.json();
-    if (!upstream.ok) throw new Error(data.error || `HTTP ${upstream.status}`);
+    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
     res.json(data.playlists || []);
   } catch (err) {
     res.status(502).json({ error: "ListenBrainz playlist fetch failed", detail: err.message });
@@ -412,11 +335,10 @@ apiRouter.post("/listenbrainz/sync-playlist/:id", async (req, res) => {
   const local = db.getPlaylist(id);
   if (!local) return res.status(404).json({ error: "Local playlist not found" });
 
-  try {
-    const createRes = await fetch("https://api.listenbrainz.org/1/playlist/create", {
+    const upstream = await safeRequest("https://api.listenbrainz.org/1/playlist/create", {
       method: "POST",
       headers: { "Authorization": `Token ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: {
         playlist: {
           extension: { "https://listenbrainz.org/public": { public: true } },
           title: local.title,
@@ -426,10 +348,10 @@ apiRouter.post("/listenbrainz/sync-playlist/:id", async (req, res) => {
             creator: v.artist,
           }))
         }
-      })
+      }
     });
-    const data = await createRes.json();
-    if (!createRes.ok) throw new Error(data.error || `HTTP ${createRes.status}`);
+    const data = await upstream.json();
+    if (!upstream.ok) throw new Error(data.error || `HTTP ${upstream.status}`);
     res.json({ ok: true, playlist_mbid: data.playlist_mbid });
   } catch (err) {
     res.status(502).json({ error: "ListenBrainz sync failed", detail: err.message });
@@ -439,7 +361,7 @@ apiRouter.post("/listenbrainz/sync-playlist/:id", async (req, res) => {
 apiRouter.get("/listenbrainz/playlist/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const upstream = await fetch(`https://api.listenbrainz.org/1/playlist/${id}`);
+    const upstream = await safeRequest(`https://api.listenbrainz.org/1/playlist/${id}`);
     const data = await upstream.json();
     if (!upstream.ok) throw new Error(data.error || `LB HTTP ${upstream.status}`);
     const playlist = {
@@ -461,7 +383,7 @@ apiRouter.get("/listenbrainz/playlist/:id", async (req, res) => {
 apiRouter.post("/listenbrainz/import-playlist/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const upstream = await fetch(`https://api.listenbrainz.org/1/playlist/${id}`);
+    const upstream = await safeRequest(`https://api.listenbrainz.org/1/playlist/${id}`);
     const data = await upstream.json();
     if (!upstream.ok) throw new Error(data.error || `LB HTTP ${upstream.status}`);
     const title = data.playlist.title || "Imported LB Playlist";
@@ -483,7 +405,7 @@ apiRouter.get("/listenbrainz/validate", async (req, res) => {
   const token = req.query.token || db.getSettingsRaw().listenBrainzToken;
   if (!token) return res.status(400).json({ error: "No token provided" });
   try {
-    const upstream = await fetch("https://api.listenbrainz.org/1/validate-token", {
+    const upstream = await safeRequest("https://api.listenbrainz.org/1/validate-token", {
       headers: { "Authorization": `Token ${token}` }
     });
     const data = await upstream.json();
@@ -518,10 +440,10 @@ apiRouter.post("/scrobble", async (req, res) => {
     } else {
       payload = { listen_type: "import", payload: tracks.map((t, index) => ({ listened_at: Math.floor(Date.now() / 1000) - (tracks.length - index), track_metadata: t })) };
     }
-    const upstream = await fetch("https://api.listenbrainz.org/1/submit-listens", {
+    const upstream = await safeRequest("https://api.listenbrainz.org/1/submit-listens", {
       method: "POST",
       headers: { "Authorization": `Token ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: payload
     });
     if (!upstream.ok) return res.status(upstream.status).json({ error: "ListenBrainz error", detail: await upstream.text() });
     res.json({ ok: true, count: listen_type === "import" ? tracks.length : 1 });
@@ -542,11 +464,11 @@ apiRouter.all("/ollama", async (req, res) => {
     const host = parsed.hostname.toLowerCase();
     const isPrivate = host === "localhost" || host === "127.0.0.1" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.)/.test(host);
     if (!allowLocal && isPrivate) return res.status(403).json({ error: "Local Ollama blocked" });
-    const upstream = await fetch(`${targetUrl.replace(/\/$/, "")}${ollamaPath}`, {
+    const upstream = await safeRequest(`${targetUrl.replace(/\/$/, "")}${ollamaPath}`, {
       method: req.method,
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      ...(req.method === "POST" ? { body: JSON.stringify(req.body) } : {}),
-      signal: AbortSignal.timeout(35000),
+      ...(req.method === "POST" ? { body: req.body } : {}),
+      timeout: 35000,
     });
     const data = await upstream.json();
     res.status(upstream.status).json(data);
@@ -560,11 +482,11 @@ apiRouter.post("/gotify", async (req, res) => {
   const { token, payload } = req.body || {};
   if (!token || !payload) return res.status(400).json({ error: "Missing token/payload" });
   try {
-    const upstream = await fetch(`${GOTIFY_SERVER_URL}/message`, {
+    const upstream = await safeRequest(`${GOTIFY_SERVER_URL}/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Gotify-Key": token },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
+      body: payload,
+      timeout: 10000,
     });
     res.status(upstream.status).send(await upstream.text());
   } catch (err) { res.status(502).json({ error: "Gotify unreachable", detail: err.message }); }
@@ -621,6 +543,26 @@ app.get("/api/sponsorBlock", (_req, res) => {
   res.json({ segments: [] });
 });
 
+// ── WebSocket upgrade response construction helper ───────────────────────────────
+
+/**
+ * Build HTTP upgrade response for WebSocket proxying.
+ * Properly handles header values that might contain special characters.
+ */
+function buildWebSocketUpgradeResponse(upstreamHeaders) {
+  const headerLines = [];
+  for (const [key, value] of Object.entries(upstreamHeaders)) {
+    // Skip headers that shouldn't be forwarded
+    if (key === 'transfer-encoding' || key === 'connection') continue;
+    // Sanitize header values - remove any newlines to prevent header injection
+    const safeValue = String(value).replace(/[\r\n]/g, ' ').trim();
+    if (safeValue) {
+      headerLines.push(`${key}: ${safeValue}`);
+    }
+  }
+  return `HTTP/1.1 101 Switching Protocols\r\n${headerLines.join('\r\n')}\r\n\r\n`;
+}
+
 // ── API: Lyrics proxy (NetEase Cloud Music) ────────────────────────────────────
 // Forwards requests to NetEase (music.163.com) which blocks cross-origin browser requests.
 // The server makes the request server-side and returns the JSON with CORS headers set.
@@ -630,9 +572,9 @@ app.get("/api/lyrics-proxy/netease/search", async (req, res) => {
   if (!s) return res.status(400).json({ error: "Missing query param: s" });
   try {
     const url = `https://music.163.com/api/search/get?s=${encodeURIComponent(s)}&type=1&limit=${limit || 5}`;
-    const upstream = await fetch(url, {
+    const upstream = await safeRequest(url, {
       headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
-      signal: AbortSignal.timeout(6000),
+      timeout: 6000,
     });
     if (!upstream.ok) return res.status(upstream.status).json({ error: "NetEase search error" });
     const data = await upstream.json();
@@ -648,9 +590,9 @@ app.get("/api/lyrics-proxy/netease/lyric", async (req, res) => {
   if (!id) return res.status(400).json({ error: "Missing query param: id" });
   try {
     const url = `https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`;
-    const upstream = await fetch(url, {
+    const upstream = await safeRequest(url, {
       headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://music.163.com/" },
-      signal: AbortSignal.timeout(6000),
+      timeout: 6000,
     });
     if (!upstream.ok) return res.status(upstream.status).json({ error: "NetEase lyric error" });
     const data = await upstream.json();
@@ -663,20 +605,70 @@ app.get("/api/lyrics-proxy/netease/lyric", async (req, res) => {
 
 // Helper to sidestep Node 18 native fetch/undici IPv6 resolution bugs
 const https = require('https');
-function safeFetchJson(url) {
+const http = require('http');
+
+/**
+ * Robust replacement for fetch that forces IPv4 to avoid Undici bugs.
+ */
+function safeRequest(url, options = {}) {
+  const { method = 'GET', headers = {}, body, timeout = 15000 } = options;
   return new Promise((resolve, reject) => {
-    https.get(url, { family: 4, headers: { "User-Agent": "Elysium/1.12" } }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        if (res.statusCode === 429) return reject(new Error("429"));
-        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}`));
-        try { resolve(JSON.parse(data)); } catch(e) { reject(e); }
+    try {
+      const parsed = new URL(url);
+
+      // Normalize body to string once to avoid double-stringification
+      let bodyString = undefined;
+      if (body !== undefined) {
+        bodyString = typeof body === 'string' ? body : JSON.stringify(body);
+      }
+
+      const reqOptions = {
+        method,
+        hostname: parsed.hostname,
+        port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+        path: parsed.pathname + parsed.search,
+        headers: {
+          ...headers,
+          "User-Agent": "Elysium/1.12",
+          ...(bodyString !== undefined ? { "Content-Length": Buffer.byteLength(bodyString) } : {})
+        },
+        family: 4, // Force IPv4
+      };
+
+      const client = parsed.protocol === 'https:' ? https : http;
+      const req = client.request(reqOptions, (res) => {
+        let responseData = '';
+        res.on('data', chunk => responseData += chunk);
+        res.on('end', () => {
+          const result = {
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            headers: {
+              get: (name) => res.headers[name.toLowerCase()],
+              getSetCookie: () => res.headers['set-cookie'] || [],
+            },
+            json: async () => JSON.parse(responseData),
+            text: async () => responseData,
+          };
+          resolve(result);
+        });
       });
-    }).on('error', reject).setTimeout(8000, function() {
-        this.destroy(); reject(new Error("Timeout"));
-    });
+
+      req.on('error', (err) => reject(new Error(`Network Error: ${err.message}`)));
+      req.setTimeout(timeout, () => { req.destroy(); reject(new Error("Request Timeout")); });
+
+      if (bodyString !== undefined) {
+        req.write(bodyString);
+      }
+      req.end();
+    } catch (e) {
+      reject(e);
+    }
   });
+}
+
+function safeFetchJson(url) {
+  return safeRequest(url).then(r => r.json());
 }
 
 // ── API: iTunes / Apple Music proxy ───────────────────────────────────────────
@@ -770,11 +762,11 @@ async function invidiousApiCall(instanceBase, sid, path, { method = "GET", body 
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(url, {
+  const res = await safeRequest(url, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(15_000),
+    body,
+    timeout: 15_000,
   });
   return res;
 }
@@ -794,12 +786,11 @@ app.post("/api/invidious/login", async (req, res) => {
 
   try {
     const formBody = new URLSearchParams({ email: username, password, action: "signin" }).toString();
-    const loginRes = await fetch(`${base}/login`, {
+    const loginRes = await safeRequest(`${base}/login`, {
       method:   "POST",
       headers:  { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "Elysium/1.0" },
       body:     formBody,
-      redirect: "manual",
-      signal:   AbortSignal.timeout(15_000),
+      timeout:  15_000,
     });
 
     // Collect Set-Cookie headers
@@ -1228,11 +1219,8 @@ server.on("upgrade", (req, socket, head) => {
   });
 
   upstream.on("upgrade", (upRes, upSocket, upHead) => {
-    socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\n` +
-      Object.entries(upRes.headers).map(([k, v]) => `${k}: ${v}`).join("\r\n") +
-      "\r\n\r\n"
-    );
+    const response = buildWebSocketUpgradeResponse(upRes.headers);
+    socket.write(response);
     if (upHead && upHead.length) upSocket.unshift(upHead);
     upSocket.pipe(socket);
     socket.pipe(upSocket);
