@@ -13,24 +13,12 @@
 
 const express = require("express");
 const db      = require("./db");
+const { createLogger } = require("./logger");
 
 const router = express.Router();
 
-// ── Shared structured logger (mirrors server/index.js) ───────────────────────
-const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
-const LOG_LEVEL = LEVELS[(process.env.LOG_LEVEL || "info").toLowerCase()] ?? LEVELS.info;
-
-const log = {
-  _emit(level, msg, extra = {}) {
-    if (LEVELS[level] < LOG_LEVEL) return;
-    const line = JSON.stringify({ ts: new Date().toISOString(), level: level.toUpperCase(), svc: "elysium", msg, ...extra });
-    (level === "error" || level === "warn" ? process.stderr : process.stdout).write(line + "\n");
-  },
-  debug: (msg, e) => log._emit("debug", msg, e),
-  info:  (msg, e) => log._emit("info",  msg, e),
-  warn:  (msg, e) => log._emit("warn",  msg, e),
-  error: (msg, e) => log._emit("error", msg, e),
-};
+// ── Shared structured logger ─────────────────────────────────────────────────
+const log = createLogger("elysium");
 
 // ── POST /api/v1/library/recommendations/queue ────────────────────────────────
 router.post("/queue", async (req, res) => {

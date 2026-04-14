@@ -28,16 +28,36 @@ const defaultData = {
     ollamaEnabled:        false,
     ollamaUrl:            "",
     ollamaModel:          "llama3.2:3b",
-    invidiousInstance:    "",          // NEW in v2 — replaces hardcoded default in queue.js
+    invidiousInstance:    "",
     listenBrainzToken:    "",
     listenBrainzUsername: "",
-    invidiousSid:         "",          // session cookie — never exposed via GET /settings
+    invidiousSid:         "",
     invidiousUsername:    "",
     lastFmApiKey:         "",
     queueMode:            "off",
     highQuality:          false,
     cacheEnabled:         true,
     videoMode:            false,
+    apiSecret:            "",
+    sponsorBlock:         false,
+    sponsorBlockCategories: [],
+    analytics:            false,
+    exportFileName:       null,
+    exportLastDate:       null,
+    gotifyUrl:            null,
+    gotifyToken:          null,
+    gotifyEnabled:        false,
+    syncEnabled:          false,
+    syncInterval:        30,
+    lastSyncAt:           null,
+    linkedDevices:        [],
+    listenBrainzEnabled:  false,
+    listenBrainzPlayingNow: false,
+    listenBrainzScrobblePercent: 50,
+    listenBrainzScrobbleMaxSeconds: 240,
+    invidiousPlaylistPrivacy: "private",
+    invidiousAutoPush:    false,
+    invidiousPlaylistMappings: {},
   },
   history:   [],
   playlists: [],
@@ -57,6 +77,32 @@ function migrate(data) {
     data.settings.highQuality       = data.settings.highQuality       ?? false;
     data.settings.cacheEnabled      = data.settings.cacheEnabled      ?? true;
     data.version = 2;
+  }
+
+  // v2 → v3: add all new settings fields for mobile app compatibility
+  if (v < 3) {
+    data.settings = data.settings || {};
+    data.settings.apiSecret = data.settings.apiSecret || "";
+    data.settings.sponsorBlock = data.settings.sponsorBlock ?? false;
+    data.settings.sponsorBlockCategories = data.settings.sponsorBlockCategories || [];
+    data.settings.analytics = data.settings.analytics ?? false;
+    data.settings.exportFileName = data.settings.exportFileName || null;
+    data.settings.exportLastDate = data.settings.exportLastDate || null;
+    data.settings.gotifyUrl = data.settings.gotifyUrl || null;
+    data.settings.gotifyToken = data.settings.gotifyToken || null;
+    data.settings.gotifyEnabled = data.settings.gotifyEnabled ?? false;
+    data.settings.syncEnabled = data.settings.syncEnabled ?? false;
+    data.settings.syncInterval = data.settings.syncInterval ?? 30;
+    data.settings.lastSyncAt = data.settings.lastSyncAt || null;
+    data.settings.linkedDevices = data.settings.linkedDevices || [];
+    data.settings.listenBrainzEnabled = data.settings.listenBrainzEnabled ?? false;
+    data.settings.listenBrainzPlayingNow = data.settings.listenBrainzPlayingNow ?? false;
+    data.settings.listenBrainzScrobblePercent = data.settings.listenBrainzScrobblePercent ?? 50;
+    data.settings.listenBrainzScrobbleMaxSeconds = data.settings.listenBrainzScrobbleMaxSeconds ?? 240;
+    data.settings.invidiousPlaylistPrivacy = data.settings.invidiousPlaylistPrivacy || "private";
+    data.settings.invidiousAutoPush = data.settings.invidiousAutoPush ?? false;
+    data.settings.invidiousPlaylistMappings = data.settings.invidiousPlaylistMappings || {};
+    data.version = 3;
   }
 
   return data;
@@ -151,7 +197,15 @@ const SETTINGS_FIELDS = new Set([
   "listenBrainzToken", "listenBrainzUsername",
   "invidiousSid", "invidiousUsername",
   "queueMode", "highQuality", "cacheEnabled", "videoMode",
-  "lastFmApiKey",
+  "lastFmApiKey", "apiSecret",
+  // New settings from mobile app
+  "sponsorBlock", "sponsorBlockCategories", "analytics",
+  "exportFileName", "exportLastDate",
+  "gotifyUrl", "gotifyToken", "gotifyEnabled",
+  "syncEnabled", "syncInterval", "lastSyncAt", "linkedDevices",
+  "listenBrainzEnabled", "listenBrainzPlayingNow",
+  "listenBrainzScrobblePercent", "listenBrainzScrobbleMaxSeconds",
+  "invidiousPlaylistPrivacy", "invidiousAutoPush", "invidiousPlaylistMappings",
 ]);
 
 function filterSettings(updates) {
@@ -239,13 +293,15 @@ module.exports = {
       const dedup = track.videoId
         ? db.history.filter(t => t.videoId !== track.videoId)
         : db.history;
-      db.history = [track, ...dedup].slice(0, 150);
+      db.history = [{ ...track, addedAt: new Date().toISOString() }, ...dedup].slice(0, 150);
     });
     return getDb().history;
   },
 
   updateHistory: (id, updates) => {
-    const safe = filterTrack({ ...getDb().history.find(t => t.videoId === id), ...updates });
+    const existing = getDb().history.find(t => t.videoId === id);
+    if (!existing) return null;
+    const safe = filterTrack({ ...existing, ...updates });
     let result = null;
     _mutate((db) => {
       const idx = db.history.findIndex(t => t.videoId === id);
