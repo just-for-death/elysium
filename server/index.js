@@ -303,7 +303,10 @@ apiRouter.get("/lrclib/get", async (req, res) => {
     if (album) params.set("album_name", album);
     if (duration) params.set("duration", duration);
     const upstream = await safeRequest(`https://lrclib.net/api/get?${params}`, {
-      headers: { "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)" },
+      headers: {
+        "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)",
+        "Lrclib-Client": "Elysium Music Player",
+      },
       timeout: 8000,
     });
     if (upstream.status === 404) return res.status(404).json({ error: "Not found" });
@@ -317,7 +320,10 @@ apiRouter.get("/lrclib/search", async (req, res) => {
   if (!q) return res.status(400).json({ error: "Missing query" });
   try {
     const upstream = await safeRequest(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, {
-      headers: { "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)" },
+      headers: {
+        "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)",
+        "Lrclib-Client": "Elysium Music Player",
+      },
       timeout: 8000,
     });
     if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
