@@ -38,7 +38,6 @@ const defaultData = {
     highQuality:          false,
     cacheEnabled:         true,
     videoMode:            false,
-    apiSecret:            "",
     sponsorBlock:         false,
     sponsorBlockCategories: [],
     analytics:            false,
@@ -82,7 +81,6 @@ function migrate(data) {
   // v2 → v3: add all new settings fields for mobile app compatibility
   if (v < 3) {
     data.settings = data.settings || {};
-    data.settings.apiSecret = data.settings.apiSecret || "";
     data.settings.sponsorBlock = data.settings.sponsorBlock ?? false;
     data.settings.sponsorBlockCategories = data.settings.sponsorBlockCategories || [];
     data.settings.analytics = data.settings.analytics ?? false;
@@ -197,7 +195,7 @@ const SETTINGS_FIELDS = new Set([
   "listenBrainzToken", "listenBrainzUsername",
   "invidiousSid", "invidiousUsername",
   "queueMode", "highQuality", "cacheEnabled", "videoMode",
-  "lastFmApiKey", "apiSecret",
+  "lastFmApiKey",
   // New settings from mobile app
   "sponsorBlock", "sponsorBlockCategories", "analytics",
   "exportFileName", "exportLastDate",
