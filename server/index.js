@@ -308,6 +308,40 @@ apiRouter.get("/netease/lyric", async (req, res) => {
   } catch (err) { res.status(502).json({ error: "NetEase lyrics failed", detail: err.message }); }
 });
 
+// ── LRCLIB lyrics proxy ───────────────────────────────────────────────────────
+// LRCLIB is a free, open-source lyrics database with excellent coverage for
+// Western music. Returns synced (LRC) and plain lyrics in a single request.
+
+apiRouter.get("/lrclib/get", async (req, res) => {
+  const { artist, title, album, duration } = req.query;
+  if (!artist || !title) return res.status(400).json({ error: "Missing artist or title" });
+  try {
+    const params = new URLSearchParams({ artist_name: artist, track_name: title });
+    if (album) params.set("album_name", album);
+    if (duration) params.set("duration", duration);
+    const upstream = await safeRequest(`https://lrclib.net/api/get?${params}`, {
+      headers: { "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)" },
+      timeout: 8000,
+    });
+    if (upstream.status === 404) return res.status(404).json({ error: "Not found" });
+    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
+    res.setHeader("Cache-Control", "public, max-age=3600").json(await upstream.json());
+  } catch (err) { res.status(502).json({ error: "LRCLIB lookup failed", detail: err.message }); }
+});
+
+apiRouter.get("/lrclib/search", async (req, res) => {
+  const { q } = req.query;
+  if (!q) return res.status(400).json({ error: "Missing query" });
+  try {
+    const upstream = await safeRequest(`https://lrclib.net/api/search?q=${encodeURIComponent(q)}`, {
+      headers: { "User-Agent": "Elysium-Music/1.0 (https://github.com/elysium)" },
+      timeout: 8000,
+    });
+    if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
+    res.setHeader("Cache-Control", "public, max-age=3600").json(await upstream.json());
+  } catch (err) { res.status(502).json({ error: "LRCLIB search failed", detail: err.message }); }
+});
+
 // ── Invidious proxy endpoints ──────────────────────────────────────────────
 // All Invidious API calls are handled by direct app routes (defined later).
 // Router-based Invidious endpoints were removed to avoid duplicate definitions.
