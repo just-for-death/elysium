@@ -32,12 +32,12 @@ export const Trending: FC<TrendingProps> = memo(({ horizontal = false }) => {
   );
   const { t } = useTranslation();
 
-  if (!query.data) {
-    return <Text>{t("loading")}</Text>;
+  if (query.isError) {
+    return <Text>{t("error")}</Text>;
   }
 
-  if (query.error) {
-    return <Text>{t("error")}</Text>;
+  if (query.isLoading || !query.data) {
+    return <Text>{t("loading")}</Text>;
   }
 
   if (horizontal) {

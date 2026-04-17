@@ -24,6 +24,14 @@ export const usePaginateData = (cards: Card[]) => {
   const chunkedRef = useRef(chunkedData);
   chunkedRef.current = chunkedData;
 
+  // Reset pagination whenever the underlying card list changes (new search,
+  // filter, etc.) so users don't see merged results from the previous list.
+  useEffect(() => {
+    setPage(0);
+    setData(chunkedData[0] ?? []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chunkedData]);
+
   useEffect(() => {
     if (inView) {
       const nextPage = page + 1;

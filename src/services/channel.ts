@@ -10,6 +10,7 @@ const getBase = () => normalizeInstanceUri(getCurrentInstance().uri);
 
 export const getChannel = async (authorId: string): Promise<Channel> => {
   const request = await fetch(`${getBase()}/api/v1/channels/${authorId}`);
+  if (!request.ok) throw new Error(`Channel fetch failed: ${request.status}`);
   return request.json();
 };
 
@@ -31,6 +32,7 @@ export const getChannelVideos = async (
   const request = await fetch(
     `${base}/api/v1/channels/${authorId}/videos?${qs.stringify(params)}`,
   );
+  if (!request.ok) throw new Error(`Channel videos fetch failed: ${request.status}`);
   const data: {
     videos: Video[];
     continuation: string | null;
@@ -60,6 +62,7 @@ export const getChannelPlaylists = async (
   const request = await fetch(
     `${base}/api/v1/channels/${authorId}/playlists?${qs.stringify(params)}`,
   );
+  if (!request.ok) throw new Error(`Channel playlists fetch failed: ${request.status}`);
   const data: {
     playlists: Playlist[];
     continuation: string | null;

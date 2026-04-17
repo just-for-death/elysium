@@ -21,7 +21,7 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export const getPopuplars = async (
+export const getPopulars = async (
   _instance: Instance,
   country: string | null = null,
 ): Promise<CardVideo[]> => {
@@ -38,7 +38,10 @@ export const getPopuplars = async (
     }
     return appleData;
   } catch (err) {
-    log.warn("getPopuplars: Apple Charts failed", { err });
+    log.warn("getPopulars: Apple Charts failed", { err });
     return [];
   }
 };
+
+/** @deprecated Typo alias kept for backwards compatibility. Use {@link getPopulars}. */
+export const getPopuplars = getPopulars;

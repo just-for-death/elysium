@@ -191,7 +191,11 @@ apiRouter.get("/playlists/:id", (req, res) => {
   if (!item) return res.status(404).json({ error: "Not found" });
   res.json(item);
 });
-apiRouter.put("/playlists/:id", (req, res) => res.json(db.updatePlaylist(req.params.id, req.body)));
+apiRouter.put("/playlists/:id", (req, res) => {
+  const item = db.updatePlaylist(req.params.id, req.body);
+  if (!item) return res.status(404).json({ error: "Not found" });
+  res.json(item);
+});
 apiRouter.delete("/playlists/:id", (req, res) => { db.deletePlaylist(req.params.id); res.json({ok:true}); });
 
 apiRouter.get("/artists", (req, res) => res.json(db.getArtists()));
@@ -344,8 +348,8 @@ apiRouter.get("/listenbrainz/playlists", async (req, res) => {
     const upstream = await safeRequest(`https://api.listenbrainz.org/1/user/${encodeURIComponent(user)}/playlists`, {
       headers: { "Authorization": `Token ${token}` }
     });
-    const data = await upstream.json();
     if (!upstream.ok) throw new Error(`HTTP ${upstream.status}`);
+    const data = await upstream.json();
     res.json(data.playlists || []);
   } catch (err) {
     res.status(502).json({ error: "ListenBrainz playlist fetch failed", detail: err.message });
@@ -463,6 +467,9 @@ apiRouter.post("/scrobble", async (req, res) => {
     if (listen_type === "single") {
       payload = { listen_type: "single", payload: [{ listened_at: Math.floor(Date.now() / 1000), track_metadata }] };
     } else {
+      if (!Array.isArray(tracks) || tracks.length === 0) {
+        return res.status(400).json({ error: "listen_type=import requires a non-empty tracks array" });
+      }
       payload = { listen_type: "import", payload: tracks.map((t, index) => ({ listened_at: Math.floor(Date.now() / 1000) - (tracks.length - index), track_metadata: t })) };
     }
     const upstream = await safeRequest("https://api.listenbrainz.org/1/submit-listens", {
@@ -518,6 +525,21 @@ apiRouter.post("/gotify", async (req, res) => {
 });
 
 app.use("/api/v1/library", apiRouter);
+
+// ── Legacy path aliases ──────────────────────────────────────────────────────
+// The client-side services (ollama.ts, gotify.ts) call these shorter paths
+// when running from a remote origin. They are aliased to the apiRouter handlers
+// so both paths work without duplicating the route logic.
+
+app.all("/api/ollama-proxy", (req, res, next) => {
+  req.url = "/ollama";
+  apiRouter(req, res, next);
+});
+
+app.post("/api/gotify-proxy", (req, res, next) => {
+  req.url = "/gotify";
+  apiRouter(req, res, next);
+});
 
 // ── Proxy: /api/live/* → sync-server ─────────────────────────────────────────
 //
@@ -689,7 +711,11 @@ function safeRequest(url, options = {}) {
 }
 
 function safeFetchJson(url) {
-  return safeRequest(url).then(r => r.json());
+  return safeRequest(url).then(r => {
+    if (r.status === 429) throw Object.assign(new Error("429"), { status: 429 });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  });
 }
 
 // ── API: iTunes / Apple Music proxy ───────────────────────────────────────────
@@ -791,6 +817,36 @@ async function invidiousApiCall(instanceBase, sid, path, { method = "GET", body 
   });
   return res;
 }
+
+// ── GET /api/invidious/search ─────────────────────────────────────────────────
+// Proxies a search query to the configured Invidious instance.
+// Called by listenbrainz.ts → resolveTrackToYouTube when running server-side.
+app.get("/api/invidious/search", async (req, res) => {
+  const settings = db.getSettingsRaw();
+  const rawBase = (req.headers["x-invidious-instance"] || settings.invidiousInstance || "").replace(/\/+$/, "");
+  if (!rawBase) {
+    return res.status(400).json({ error: "Invidious instance not configured" });
+  }
+
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid instanceUrl: ${e.message}` }); }
+
+  const { q, type = "video", sort_by = "relevance", page = "1" } = req.query;
+  if (!q) return res.status(400).json({ error: "Missing query param: q" });
+
+  try {
+    const params = new URLSearchParams({ q, type, sort_by, page });
+    const upstream = await safeRequest(`${base}/api/v1/search?${params}`, {
+      timeout: 10_000,
+    });
+    if (!upstream.ok) throw new Error(`Invidious search HTTP ${upstream.status}`);
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json(await upstream.json());
+  } catch (err) {
+    res.status(502).json({ error: "Invidious search failed", detail: err.message });
+  }
+});
 
 // ── POST /api/invidious/login ─────────────────────────────────────────────────
 // Body: { instanceUrl, username, password }
@@ -1322,4 +1378,5 @@ process.on("uncaughtException", (err) => {
 });
 process.on("unhandledRejection", (reason) => {
   log.error("unhandledRejection", { reason: String(reason) });
+  process.exit(1);
 });

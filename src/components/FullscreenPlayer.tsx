@@ -464,7 +464,10 @@ const LyricsView = memo(() => {
 
   useEffect(() => {
     if (activeLineRef.current) {
-      activeLineRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Use "instant" not "smooth" — smooth runs a JS animation on every 500ms
+      // listen tick, causing main-thread jank on WebKit (iPad/iPhone) that
+      // competes with audio buffering. Matches SyncedLyrics.tsx behavior.
+      activeLineRef.current.scrollIntoView({ behavior: "instant" as ScrollBehavior, block: "center" });
     }
   }, [currentIdx]);
 
