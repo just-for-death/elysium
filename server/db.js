@@ -20,7 +20,7 @@ const path = require("path");
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DB_PATH  = path.join(DATA_DIR, "library.json");
 
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const defaultData = {
   version:   DB_VERSION,
