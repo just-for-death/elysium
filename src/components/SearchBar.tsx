@@ -27,7 +27,7 @@ export const SearchBar = memo(() => {
   const form = useForm({
     initialValues: { q: searchValues.q },
     validate: {
-      q: (value) => value.length === 0,
+      q: (value) => (value.trim().length === 0 ? "Search query is required" : null),
     },
   });
 

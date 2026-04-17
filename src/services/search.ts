@@ -23,8 +23,14 @@ export const search = async ({
     } catch {
       // fall through to Invidious
     }
-    // If Apple Music fails (403/rate-limited), fall back to Invidious search
-    const instance = getCurrentInstance();
+    // If Apple Music fails (403/rate-limited), fall back to Invidious search.
+    // getCurrentInstance() throws when no instance is configured, so guard it.
+    let instance;
+    try {
+      instance = getCurrentInstance();
+    } catch {
+      return [];
+    }
     const uri = `${normalizeInstanceUri(instance.uri)}/api/v1/search`;
     const url = `${uri}?${qs.stringify({ q: params.q, type: "video", sort_by: "relevance", page: 1 })}`;
     try {

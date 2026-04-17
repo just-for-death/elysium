@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
 
 import { useSettings } from "../providers/Settings";
-import { getPopuplars } from "../services/popular";
+import { getPopulars } from "../services/popular";
 import { CardList } from "./CardList";
 import { HorizontalGridList } from "./HorizontalGridList";
 
@@ -18,17 +18,17 @@ export const Popular: FC<PopularProps> = memo(({ horizontal, country = null }) =
   const currentInstance = settings?.currentInstance;
   const query = useQuery(
     ["most-popular", currentInstance?.uri, country],
-    () => getPopuplars(currentInstance!, country),
+    () => getPopulars(currentInstance!, country),
     { enabled: Boolean(currentInstance?.uri) },
   );
   const { t } = useTranslation();
 
-  if (!query.data) {
-    return <Text>{t("loading")}</Text>;
+  if (query.isError) {
+    return <Text>{t("error")}</Text>;
   }
 
-  if (query.error) {
-    return <Text>{t("error")}</Text>;
+  if (query.isLoading || !query.data) {
+    return <Text>{t("loading")}</Text>;
   }
 
   if (horizontal) {
