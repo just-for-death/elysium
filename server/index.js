@@ -99,23 +99,6 @@ const aiLimiter = rateLimit({
 app.use("/api", defaultLimiter);
 app.use("/push", defaultLimiter);
 
-// ── Optional API Authentication ───────────────────────────────────────────────
-//
-// Set API_SECRET env var to require `Authorization: Bearer <secret>` on all
-// /api/v1/library/* and /api/v1/scrobble requests.
-// Leave unset for open (LAN-only) deployments.
-
-const API_SECRET = process.env.API_SECRET || "";
-
-function requireApiKey(req, res, next) {
-  if (!API_SECRET) return next(); // not configured — allow all
-  const auth = req.headers["authorization"] || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== API_SECRET) {
-    return res.status(401).json({ error: "Unauthorized — API_SECRET required" });
-  }
-  next();
-}
 
 app.use(
   compression({
@@ -528,7 +511,7 @@ apiRouter.post("/gotify", async (req, res) => {
   } catch (err) { res.status(502).json({ error: "Gotify unreachable", detail: err.message }); }
 });
 
-app.use("/api/v1/library", requireApiKey, apiRouter);
+app.use("/api/v1/library", apiRouter);
 
 // ── Proxy: /api/live/* → sync-server ─────────────────────────────────────────
 //
@@ -1125,7 +1108,7 @@ app.get("/api/invidious/video/:id", async (req, res) => {
   }
 });
 
-// Deprecated unauthenticated proxy routes were removed to enforce requireApiKey security.
+// Deprecated duplicate proxy routes were removed; canonical routes are on apiRouter above.
 
 // ── Multi-device sync (legacy + REST) ─────────────────────────────────────────
 // Kept for backward-compat with the old 6-digit code flow.
