@@ -52,6 +52,8 @@ const BROADCAST_SECRET = process.env.BROADCAST_SECRET  || "";
 // CORS configuration: comma-separated list of allowed origins, or "*" for all
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*").split(",").map(s => s.trim());
 
+const LOG_LEVEL_NAME = (process.env.LOG_LEVEL || "info").toLowerCase();
+
 // ── Web Push ──────────────────────────────────────────────────────────────────
 
 let pushEnabled = false;
@@ -335,6 +337,7 @@ apiRouter.post("/listenbrainz/sync-playlist/:id", async (req, res) => {
   const local = db.getPlaylist(id);
   if (!local) return res.status(404).json({ error: "Local playlist not found" });
 
+  try {
     const upstream = await safeRequest("https://api.listenbrainz.org/1/playlist/create", {
       method: "POST",
       headers: { "Authorization": `Token ${token}`, "Content-Type": "application/json" },
@@ -393,8 +396,7 @@ apiRouter.post("/listenbrainz/import-playlist/:id", async (req, res) => {
       title: t.title,
       artist: t.creator,
     }));
-    const pl = db.createPlaylist(title);
-    for (const t of tracks) { db.addTrackToPlaylist(pl.id, t); }
+    const pl = db.addPlaylist({ title, videos: tracks });
     res.json({ ok: true, playlist: pl });
   } catch (err) {
     res.status(502).json({ error: "LB playlist import failed", detail: err.message });
@@ -493,9 +495,6 @@ apiRouter.post("/gotify", async (req, res) => {
 });
 
 app.use("/api/v1/library", requireApiKey, apiRouter);
-
-// SPA fallback
-app.get("*", (_req, res) => res.sendFile(path.join(BUILD_DIR, "index.html")));
 
 // ── Proxy: /api/live/* → sync-server ─────────────────────────────────────────
 //
@@ -605,7 +604,6 @@ app.get("/api/lyrics-proxy/netease/lyric", async (req, res) => {
 
 // Helper to sidestep Node 18 native fetch/undici IPv6 resolution bugs
 const https = require('https');
-const http = require('http');
 
 /**
  * Robust replacement for fetch that forces IPv4 to avoid Undici bugs.
@@ -863,10 +861,14 @@ app.get("/api/invidious/playlists", async (req, res) => {
 // Body: { title, privacy }
 // Response: { playlistId }
 app.post("/api/invidious/playlists", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
+  const rawBase = (req.headers["x-invidious-instance"] || "").trim();
+  const sid     = req.headers["x-invidious-sid"] || "";
   const { title, privacy = "private" } = req.body || {};
-  if (!base || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  if (!rawBase) return res.status(400).json({ error: "X-Invidious-Instance header required" });
+  if (!sid)     return res.status(400).json({ error: "X-Invidious-SID header required" });
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid X-Invidious-Instance: ${e.message}` }); }
   if (!title) return res.status(400).json({ error: "title is required" });
 
   try {
@@ -891,11 +893,14 @@ app.post("/api/invidious/playlists", async (req, res) => {
 // Headers: X-Invidious-Instance, X-Invidious-SID
 // Body: { videoId }
 app.post("/api/invidious/playlists/:id/videos", async (req, res) => {
-  const base       = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
+  const rawBase    = (req.headers["x-invidious-instance"] || "").trim();
   const sid        = req.headers["x-invidious-sid"] || "";
   const playlistId = req.params.id;
   const { videoId } = req.body || {};
-  if (!base || !sid) return res.status(400).json({ error: "Headers required" });
+  if (!rawBase || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid X-Invidious-Instance: ${e.message}` }); }
   if (!videoId) return res.status(400).json({ error: "videoId required" });
 
   try {
@@ -920,10 +925,13 @@ app.post("/api/invidious/playlists/:id/videos", async (req, res) => {
 // Uses /api/v1/auth/playlists/:id which returns complete video data (unlike
 // the list endpoint /api/v1/auth/playlists which returns videos: [] for each).
 app.get("/api/invidious/playlists/:id", async (req, res) => {
-  const base = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid  = req.headers["x-invidious-sid"] || "";
-  const { id } = req.params;
-  if (!base || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  const rawBase = (req.headers["x-invidious-instance"] || "").trim();
+  const sid     = req.headers["x-invidious-sid"] || "";
+  const { id }  = req.params;
+  if (!rawBase || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid X-Invidious-Instance: ${e.message}` }); }
 
   try {
     const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}`);
@@ -936,6 +944,30 @@ app.get("/api/invidious/playlists/:id", async (req, res) => {
     res.send(text);
   } catch (err) {
     log.error("invidious:get-playlist", { err: err.message, id });
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ── DELETE /api/invidious/playlists/:id ──────────────────────────────────────
+app.delete("/api/invidious/playlists/:id", async (req, res) => {
+  const rawBase = (req.headers["x-invidious-instance"] || "").trim();
+  const sid     = req.headers["x-invidious-sid"] || "";
+  const { id }  = req.params;
+  if (!rawBase || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid X-Invidious-Instance: ${e.message}` }); }
+
+  try {
+    const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}`, { method: "DELETE" });
+    const text = await upstream.text();
+    if (!upstream.ok) {
+      log.warn("invidious:delete-playlist:error", { base, id, status: upstream.status });
+      return res.status(upstream.status).json({ error: `Invidious returned ${upstream.status}`, detail: text.slice(0, 200) });
+    }
+    res.status(204).end();
+  } catch (err) {
+    log.error("invidious:delete-playlist", { err: err.message });
     res.status(502).json({ error: err.message });
   }
 });
@@ -991,10 +1023,13 @@ app.post("/api/invidious/sync-playlist/:id", async (req, res) => {
 // NOTE: :vid must be the video's "indexId" field (not videoId) per Invidious API docs.
 // See: DELETE /api/v1/auth/playlists/:id/videos/:index
 app.delete("/api/invidious/playlists/:id/videos/:vid", async (req, res) => {
-  const base       = (req.headers["x-invidious-instance"] || "").replace(/\/+$/, "");
-  const sid        = req.headers["x-invidious-sid"] || "";
+  const rawBase     = (req.headers["x-invidious-instance"] || "").trim();
+  const sid         = req.headers["x-invidious-sid"] || "";
   const { id, vid } = req.params;
-  if (!base || !sid) return res.status(400).json({ error: "Headers required" });
+  if (!rawBase || !sid) return res.status(400).json({ error: "X-Invidious-Instance and X-Invidious-SID headers required" });
+  let base;
+  try { base = parseInstanceUrl(rawBase); }
+  catch (e) { return res.status(400).json({ error: `Invalid X-Invidious-Instance: ${e.message}` }); }
 
   try {
     const upstream = await invidiousApiCall(base, sid, `/api/v1/auth/playlists/${id}/videos/${vid}`, { method: "DELETE" });
