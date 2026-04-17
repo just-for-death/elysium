@@ -416,7 +416,10 @@ async function fromNetease(
     if (!songs.length) return null;
 
     const best =
-      songs.find(s => s.name?.toLowerCase().includes(trackName.toLowerCase())) ?? songs[0];
+      songs.find(s => s.id && s.name?.toLowerCase().includes(trackName.toLowerCase())) ??
+      songs.find(s => s.id) ??
+      songs[0];
+    if (!best?.id) return null;
 
     // Step 2: fetch lyrics
     const lyricsRes = await fetch(`/api/lyrics-proxy/netease/lyric?id=${best.id}`);

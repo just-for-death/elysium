@@ -78,6 +78,17 @@ export const SyncedLyrics = memo(() => {
     );
   }
 
+  // Check instrumental BEFORE checking for empty content — LRCLIB returns
+  // instrumental: true with null syncedLyrics + null plainLyrics, so the
+  // "no lyrics" guard below would fire first and hide this state.
+  if (lyrics?.instrumental) {
+    return (
+      <Center style={{ height: 300 }}>
+        <Text c="dimmed" size="sm">🎵 Instrumental</Text>
+      </Center>
+    );
+  }
+
   if (!lyrics || (!hasSynced && !hasPlain)) {
     return (
       <Center style={{ height: 300, flexDirection: "column", gap: 8 }}>
@@ -85,14 +96,6 @@ export const SyncedLyrics = memo(() => {
         <Text c="dimmed" size="xs">
           {artist} — {track}
         </Text>
-      </Center>
-    );
-  }
-
-  if (lyrics.instrumental) {
-    return (
-      <Center style={{ height: 300 }}>
-        <Text c="dimmed" size="sm">🎵 Instrumental</Text>
       </Center>
     );
   }

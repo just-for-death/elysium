@@ -476,6 +476,18 @@ const LyricsView = memo(() => {
     );
   }
 
+  // Check instrumental BEFORE the no-lyrics guard — LRCLIB returns
+  // instrumental: true with null syncedLyrics + null plainLyrics, so
+  // the guard below fires first and hides the instrumental state.
+  if (lyrics?.instrumental) {
+    return (
+      <Center className={classes.lyricsContainer} style={{ flexDirection: "column", gap: 12 }}>
+        <IconMusic size={36} color="rgba(42,181,165,0.4)" />
+        <Text c="rgba(255,255,255,0.5)" size="sm">Instrumental</Text>
+      </Center>
+    );
+  }
+
   if (!lyrics || (!hasSynced && !lyrics.plainLyrics)) {
     return (
       <Center className={classes.lyricsContainer} style={{ flexDirection: "column", gap: 12 }}>
@@ -484,15 +496,6 @@ const LyricsView = memo(() => {
         {(artist || track) && (
           <Text c="rgba(255,255,255,0.25)" size="xs">{artist} — {track}</Text>
         )}
-      </Center>
-    );
-  }
-
-  if (lyrics.instrumental) {
-    return (
-      <Center className={classes.lyricsContainer} style={{ flexDirection: "column", gap: 12 }}>
-        <IconMusic size={36} color="rgba(42,181,165,0.4)" />
-        <Text c="rgba(255,255,255,0.5)" size="sm">Instrumental</Text>
       </Center>
     );
   }
